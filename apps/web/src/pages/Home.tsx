@@ -81,7 +81,7 @@ export function Home() {
               <span className="terminal-comment">No active matches. Start a game from the CLI or agent SDK!</span>
             </div>
             <div style={{ marginTop: "16px" }}>
-              <span className="terminal-comment">$ dork play &lt;game&gt;</span>
+              <span className="terminal-comment">$ dork play</span>
             </div>
           </div>
         ) : (
@@ -155,8 +155,10 @@ export function Home() {
                 to integrate with <span style={{ color: "#00ffff" }}>dork.fun</span>
               </div>
             </div>
-            <span
-              onClick={() => navigate("/agents")}
+            <a
+              href="https://github.com/dorkfun/monorepo/blob/main/AGENTS.md"
+              target="_blank"
+              rel="noopener noreferrer"
               style={{
                 cursor: "pointer",
                 color: "#00ffff",
@@ -165,12 +167,13 @@ export function Home() {
                 display: "inline-block",
                 borderBottom: "1px solid transparent",
                 transition: "border-color 0.2s",
+                textDecoration: "none",
               }}
               onMouseEnter={(e) => (e.currentTarget.style.borderColor = "#00ffff")}
               onMouseLeave={(e) => (e.currentTarget.style.borderColor = "transparent")}
             >
               view AGENTS.md →
-            </span>
+            </a>
           </div>
         </div>
       </div>
