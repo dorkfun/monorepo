@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Box, Text, useInput } from "ink";
-import { WsMessage, Observation, formatAddress } from "@dorkfun/core";
+import { WsMessage, Observation, formatAddress, formatRelativeTime } from "@dorkfun/core";
 import { getGameUI } from "@dorkfun/game-ui";
 import { colors } from "../theme.js";
 import { ColoredBoard } from "../components/ColoredBoard.js";
@@ -23,6 +23,8 @@ export function WatchGame({ matchId, gameId, onBack }: WatchGameProps) {
   const [winner, setWinner] = useState<string | null>(null);
   const [reason, setReason] = useState("");
   const [error, setError] = useState("");
+  const [lastMoveAt, setLastMoveAt] = useState<number | null>(null);
+  const [lastMoveAgo, setLastMoveAgo] = useState("");
   const [wsRef] = useState(() => new GameWebSocket());
 
   const allAddresses = [...players, winner, currentPlayer].filter(Boolean) as string[];
@@ -30,6 +32,15 @@ export function WatchGame({ matchId, gameId, onBack }: WatchGameProps) {
 
   const ui = getGameUI(gameId);
   const shortId = matchId.slice(0, 8);
+
+  useEffect(() => {
+    if (lastMoveAt === null) return;
+    setLastMoveAgo(formatRelativeTime(lastMoveAt));
+    const interval = setInterval(() => {
+      setLastMoveAgo(formatRelativeTime(lastMoveAt));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [lastMoveAt]);
 
   useEffect(() => {
     const connect = async () => {
@@ -46,6 +57,7 @@ export function WatchGame({ matchId, gameId, onBack }: WatchGameProps) {
           }
           if (payload.players) setPlayers(payload.players);
           if (payload.status) setStatus(payload.status);
+          if (payload.lastMoveAt) setLastMoveAt(payload.lastMoveAt);
         });
 
         wsRef.on("STEP_RESULT", (msg: WsMessage) => {
@@ -56,6 +68,7 @@ export function WatchGame({ matchId, gameId, onBack }: WatchGameProps) {
           if (payload.nextPlayer) {
             setCurrentPlayer(payload.nextPlayer);
           }
+          setLastMoveAt(Date.now());
         });
 
         wsRef.on("GAME_STATE", (msg: WsMessage) => {
@@ -133,6 +146,7 @@ export function WatchGame({ matchId, gameId, onBack }: WatchGameProps) {
       <Text>
         <Text color={colors.dimmed}>{"> move: "}</Text>
         <Text>{turnDisplay}</Text>
+        {lastMoveAgo ? <Text color={colors.dimmed}>{` (${lastMoveAgo})`}</Text> : null}
       </Text>
 
       <Text>{""}</Text>

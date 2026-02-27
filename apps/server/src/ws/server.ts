@@ -35,7 +35,7 @@ export function createHttpWsServer(matchService: MatchService, roomManager: Room
   app.use(express.json());
 
   // Bind REST routes
-  bindRoutes(app, matchService, gameRegistry, redis, ensResolver);
+  bindRoutes(app, matchService, roomManager, gameRegistry, redis, ensResolver);
 
   const httpServer = http.createServer(app);
 

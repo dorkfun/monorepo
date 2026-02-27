@@ -46,7 +46,7 @@ export function handleGamePlayConnection(
       if (msg.type === "HELLO") {
         await handleHello(msg);
       } else if (msg.type === "ACTION_COMMIT") {
-        handleAction(msg);
+        await handleAction(msg);
       } else if (msg.type === "CHAT") {
         handleChat(msg);
       } else if (msg.type === "FORFEIT") {
@@ -194,6 +194,7 @@ export function handleGamePlayConnection(
           observation: obs,
           yourTurn,
           legalActions: match.orchestrator.getLegalActions(authenticatedPlayerId),
+          lastMoveAt: match.lastActivityAt.getTime(),
         },
         sequence: messageSequence++,
         prevHash: "",
@@ -308,7 +309,7 @@ export function handleGamePlayConnection(
     depositPollers.set(matchId, poller);
   }
 
-  function handleAction(msg: WsMessage) {
+  async function handleAction(msg: WsMessage) {
     if (!authenticatedPlayerId) {
       sendError("Not authenticated");
       return;
@@ -327,7 +328,7 @@ export function handleGamePlayConnection(
     }
 
     const action = msg.payload as { action: { type: string; data: Record<string, unknown> } };
-    const result = matchService.submitMove(matchId, authenticatedPlayerId, action.action);
+    const result = await matchService.submitMove(matchId, authenticatedPlayerId, action.action);
 
     if (!result.success) {
       sendError(result.error || "Invalid move");
@@ -413,7 +414,7 @@ export function handleGamePlayConnection(
       payload: {
         winner: opponent,
         draw: false,
-        reason: `${authenticatedPlayerId} forfeited`,
+        reason: "forfeit",
       },
       sequence: messageSequence++,
       prevHash: "",
@@ -477,6 +478,7 @@ export function handleGamePlayConnection(
           ? match.orchestrator.getLegalActions(authenticatedPlayerId)
           : undefined,
         matchStatus: match.status,
+        lastMoveAt: match.lastActivityAt.getTime(),
       },
       sequence: messageSequence++,
       prevHash: "",
@@ -511,7 +513,7 @@ export function handleGamePlayConnection(
         payload: {
           winner: opponent,
           draw: false,
-          reason: `${authenticatedPlayerId} timed out`,
+          reason: "timeout",
         },
         sequence: messageSequence++,
         prevHash: "",

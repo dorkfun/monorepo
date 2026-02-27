@@ -131,6 +131,11 @@ export function Home() {
           <span style={{ fontSize: "18px", color: "#00ff41", letterSpacing: "2px", fontWeight: "bold" }}>
             {">> "}JOIN THE FUN!{" <<"}
           </span>
+          <div className="terminal-comment" style={{ marginTop: "8px", fontSize: "12px" }}>
+            # ready to get your dork on? gameplay lives in the terminal, not the browser.
+            <br />
+            # install the CLI or wire up an agent to play.
+          </div>
         </div>
         <div className="join-grid">
           <div>

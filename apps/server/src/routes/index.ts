@@ -18,6 +18,7 @@ import {
 } from "@dorkfun/core";
 import { MatchService } from "../services/MatchService";
 import { SettlementService } from "../services/SettlementService";
+import { RoomManager } from "../ws/rooms";
 import config from "../config";
 
 /**
@@ -45,7 +46,29 @@ function requireAuth(req: Request, res: Response): { playerId: string } | null {
   return { playerId };
 }
 
-export function bindRoutes(app: Express, matchService: MatchService, gameRegistry: GameRegistry, redis: Redis, ensResolver: EnsResolver | null = null) {
+/**
+ * Validate admin access via Authorization: Bearer <ADMIN_SECRET> header.
+ * Returns true if authorized, false (after sending 401/403) otherwise.
+ */
+function requireAdmin(req: Request, res: Response): boolean {
+  if (!config.adminSecret) {
+    res.status(403).json({ error: "Admin endpoints are not configured (ADMIN_SECRET not set)" });
+    return false;
+  }
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    res.status(401).json({ error: "Authorization header required (Bearer <ADMIN_SECRET>)" });
+    return false;
+  }
+  const token = authHeader.slice(7);
+  if (token !== config.adminSecret) {
+    res.status(403).json({ error: "Invalid admin secret" });
+    return false;
+  }
+  return true;
+}
+
+export function bindRoutes(app: Express, matchService: MatchService, roomManager: RoomManager, gameRegistry: GameRegistry, redis: Redis, ensResolver: EnsResolver | null = null) {
   // Batch ENS resolution endpoint
   app.post("/api/ens/resolve", async (req, res) => {
     if (!ensResolver) {
@@ -64,7 +87,11 @@ export function bindRoutes(app: Express, matchService: MatchService, gameRegistr
 
   // Health check
   app.get("/health/check", (_req, res) => {
-    res.json({ status: "ok", timestamp: new Date().toISOString() });
+    res.json({
+      status: "ok",
+      timestamp: new Date().toISOString(),
+      emergencyMode: matchService.isEmergencyMode(),
+    });
   });
 
   // List available games — pulled dynamically from the game registry
@@ -142,6 +169,7 @@ export function bindRoutes(app: Express, matchService: MatchService, gameRegistr
 
     // Try to reconstruct the final game state by replaying moves
     let observation = null;
+    let reason: string | null = dbMatch.reason;
     const gameModule = gameRegistry.get(dbMatch.game_id);
     if (gameModule && transcript.length > 0) {
       try {
@@ -150,6 +178,12 @@ export function bindRoutes(app: Express, matchService: MatchService, gameRegistr
           state = gameModule.applyAction(state, entry.playerAddress, entry.action);
         }
         observation = gameModule.getObservation(state, players[0]);
+
+        // Infer reason from final game state if not stored in DB (older matches)
+        if (!reason && gameModule.isTerminal(state)) {
+          const outcome = gameModule.getOutcome(state);
+          reason = outcome?.reason ?? null;
+        }
       } catch {
         // Replay failed (e.g. rng-dependent init) — skip observation
       }
@@ -162,6 +196,7 @@ export function bindRoutes(app: Express, matchService: MatchService, gameRegistr
       players,
       playerNames,
       winner: dbMatch.winner,
+      reason,
       stakeWei: dbMatch.stake_wei,
       createdAt: dbMatch.created_at.toISOString(),
       completedAt: dbMatch.completed_at?.toISOString() ?? null,
@@ -184,6 +219,7 @@ export function bindRoutes(app: Express, matchService: MatchService, gameRegistr
       status: m.status,
       players: JSON.parse(m.players),
       winner: m.winner,
+      reason: m.reason,
       stakeWei: m.stake_wei,
       createdAt: m.created_at.toISOString(),
       completedAt: m.completed_at?.toISOString() ?? null,
@@ -427,5 +463,36 @@ export function bindRoutes(app: Express, matchService: MatchService, gameRegistr
     }
 
     res.json({ gameId, players, total, limit, offset, sort });
+  });
+
+  // --- Admin endpoints (protected by ADMIN_SECRET) ---
+
+  // Emergency kill switch: draw all active matches and block new ones
+  app.post("/api/admin/emergency-draw-all", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+
+    const result = await matchService.emergencyDrawAll(roomManager);
+    res.json({
+      success: true,
+      emergencyMode: true,
+      drawnMatches: result.drawnMatches,
+      cancelledMatches: result.cancelledMatches,
+      total: result.drawnMatches + result.cancelledMatches,
+    });
+  });
+
+  // Resume normal operations after emergency
+  app.post("/api/admin/emergency-resume", (req, res) => {
+    if (!requireAdmin(req, res)) return;
+
+    matchService.setEmergencyMode(false);
+    res.json({ success: true, emergencyMode: false });
+  });
+
+  // Check emergency mode status
+  app.get("/api/admin/emergency-status", (req, res) => {
+    if (!requireAdmin(req, res)) return;
+
+    res.json({ emergencyMode: matchService.isEmergencyMode() });
   });
 }

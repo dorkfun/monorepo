@@ -48,6 +48,7 @@ export type { LeaderboardEntry, LeaderboardSortBy } from "./models/playerGameSta
 
 export {
   findMatchById,
+  findActiveMatches,
   listMatches,
   listArchivedMatches,
   createMatch as createMatchRecord,
@@ -66,9 +67,8 @@ export {
   createChatMessage,
 } from "./models/chatMessages";
 
-// Migration
-export { migrateToLatest } from "./migrate";
-export type { MigrateOptions } from "./migrate";
+// Migration — NOT re-exported here to avoid pulling `fs` into browser bundles.
+// Server-only consumers should import from "@dorkfun/core/migrate" instead.
 
 // Redis
 export {

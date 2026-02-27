@@ -11,6 +11,7 @@ interface ArchivedMatch {
   status: string;
   players: string[];
   winner: string | null;
+  reason: string | null;
   stakeWei: string | null;
   createdAt: string;
   completedAt: string | null;
@@ -75,8 +76,9 @@ export function Archive() {
   };
 
   const formatOutcome = (m: ArchivedMatch) => {
-    if (m.winner) return `Winner: ${formatAddr(m.winner)}`;
-    if (m.status === "completed") return "Draw";
+    const reasonSuffix = m.reason ? ` (${m.reason})` : "";
+    if (m.winner) return `Winner: ${formatAddr(m.winner)}${reasonSuffix}`;
+    if (m.status === "completed") return `Draw${reasonSuffix}`;
     return m.status;
   };
 

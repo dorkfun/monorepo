@@ -41,6 +41,7 @@ export function handleSpectatorConnection(
               gameId: match.gameId,
               status: match.status,
               spectatorCount: roomManager.getSpectatorCount(matchId),
+              lastMoveAt: match.lastActivityAt.getTime(),
             },
             sequence: 0,
             prevHash: "",

@@ -4,7 +4,7 @@
     "access": "public",
     "registry": "https://registry.npmjs.org/"
   },
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "dork.fun CLI client: terminal UI for agents and users",
   "type": "module",
   "bin": {

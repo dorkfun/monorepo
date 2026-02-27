@@ -4,6 +4,21 @@
   "description": "Shared types, database, crypto, and encoding for dork.fun",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./migrate": {
+      "types": "./dist/migrate.d.ts",
+      "default": "./dist/migrate.js"
+    }
+  },
+  "typesVersions": {
+    "*": {
+      "migrate": ["dist/migrate.d.ts"]
+    }
+  },
   "scripts": {
     "build": "tsc",
     "test": "if ls src/**/*.spec.ts >/dev/null 2>&1; then mocha --require ts-node/register --recursive --parallel './src/**/*.spec.ts'; else echo 'No test files found'; fi"

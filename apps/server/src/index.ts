@@ -9,7 +9,8 @@ import { ConnectFourModule } from "@dorkfun/game-connectfour";
 import { CheckersModule } from "@dorkfun/game-checkers";
 import { OthelloModule } from "@dorkfun/game-othello";
 import { HexModule } from "@dorkfun/game-hex";
-import { migrateToLatest, closeDb, createRedisClient, pruneStaleQueueEntries, EnsResolver } from "@dorkfun/core";
+import { closeDb, createRedisClient, pruneStaleQueueEntries, EnsResolver } from "@dorkfun/core";
+import { migrateToLatest } from "@dorkfun/core/migrate";
 import config from "./config";
 import log from "./logger";
 import { MatchService } from "./services/MatchService";
@@ -54,7 +55,10 @@ import { createHttpWsServer } from "./ws/server";
   const matchService = new MatchService(gameRegistry, redis, settlementService);
   const roomManager = new RoomManager();
 
-  // 4b. ENS resolver (optional — uses mainnet RPC for reverse lookups)
+  // 4b. Restore in-progress matches from database (before accepting connections)
+  await matchService.restoreActiveMatches();
+
+  // 4c. ENS resolver (optional — uses mainnet RPC for reverse lookups)
   const ensRpcUrl = process.env.ENS_RPC_URL || config.rpcUrl || "https://eth.llamarpc.com";
   const ensResolver = new EnsResolver(ensRpcUrl);
   log.info({ rpc: ensRpcUrl }, "ENS resolver initialized");
@@ -92,7 +96,11 @@ import { createHttpWsServer } from "./ws/server";
 
   // Graceful shutdown
   const shutdown = async () => {
-    log.info("Shutting down...");
+    const activeMatches = matchService.listActiveMatches();
+    log.info(
+      { activeMatchCount: activeMatches.length, matchIds: activeMatches.map((m) => m.matchId) },
+      "Shutting down — active matches will be restored on next startup"
+    );
     clearInterval(cleanupInterval);
     clearInterval(staleCleanupInterval);
     clearInterval(queuePruneInterval);

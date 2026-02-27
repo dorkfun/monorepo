@@ -41,6 +41,24 @@ export class MatchOrchestrator {
     this.prevHash = hashState(this.state);
   }
 
+  /**
+   * Reconstruct an orchestrator by replaying persisted moves.
+   * Used to restore in-progress games after a server restart.
+   * Works because all game modules are deterministic.
+   */
+  static fromReplay(
+    opts: MatchOrchestratorOptions & {
+      moves: Array<{ playerAddress: string; action: Action }>;
+    }
+  ): MatchOrchestrator {
+    const { moves, ...baseOpts } = opts;
+    const orch = new MatchOrchestrator(baseOpts);
+    for (const move of moves) {
+      orch.submitAction(move.playerAddress, move.action);
+    }
+    return orch;
+  }
+
   getState(): GameState {
     return this.state;
   }

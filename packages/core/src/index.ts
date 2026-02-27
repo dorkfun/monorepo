@@ -20,6 +20,7 @@ export {
 // ENS
 export { EnsResolver } from "./libs/EnsResolver";
 export { formatAddress } from "./libs/formatAddress";
+export { formatRelativeTime } from "./libs/relativeTime";
 
 // Elo rating
 export { calculateElo } from "./elo";

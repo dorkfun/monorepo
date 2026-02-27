@@ -25,6 +25,7 @@ export interface MatchesTable {
   status: string;
   players: string; // JSON array
   winner: string | null;
+  reason: string | null;
   transcript_hash: string | null;
   settlement_tx_hash: string | null;
   stake_wei: string | null;

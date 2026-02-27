@@ -5,6 +5,7 @@ import { TerminalWindow } from "../components/TerminalWindow";
 import { ChatPanel } from "../components/ChatPanel";
 import { LiveIndicator } from "../components/LiveIndicator";
 import { useGameState } from "../hooks/useGameState";
+import { useRelativeTime } from "../hooks/useRelativeTime";
 import { useChat } from "../hooks/useChat";
 import { useEnsNames } from "../hooks/useEnsNames";
 import { formatAddress } from "../utils/formatAddress";
@@ -43,9 +44,12 @@ export function WatchGame() {
         turnNumber: archived.observation?.turnNumber ?? archived.transcript?.length ?? 0,
         gameOver: true,
         winner: archived.winner,
-        reason: archived.status,
+        reason: archived.reason || archived.status,
+        lastMoveAt: null as number | null,
       }
     : state;
+
+  const lastMoveAgo = useRelativeTime(displayState.lastMoveAt);
 
   const allAddresses = [...displayState.players, displayState.winner, displayState.currentPlayer].filter(Boolean) as string[];
   const ensNames = useEnsNames(allAddresses);
@@ -105,6 +109,9 @@ export function WatchGame() {
         <div className="terminal-line">
           <span className="terminal-comment">&gt; move: </span>
           <span>{turnDisplay}</span>
+          {lastMoveAgo && (
+            <span className="terminal-comment"> ({lastMoveAgo})</span>
+          )}
         </div>
 
         <div style={{ margin: "16px 0" }}>

@@ -13,8 +13,10 @@ import {
   findPlayerByAddress,
   upsertPlayerGameStats,
   findPlayerGameStats,
-  createMatchMoves,
+  createMatchMove,
   findMatchById,
+  findActiveMatches,
+  findMovesByMatchId,
   listMatches,
   storeWsToken,
   consumeWsToken,
@@ -25,6 +27,7 @@ import {
   getQueueEntries as redisQueueEntries,
   storePendingMatch,
   consumePendingMatch,
+  storeGameSession,
   deleteGameSession,
   deleteActiveMatchForPlayer,
   storeActiveMatchForPlayer,
@@ -60,6 +63,8 @@ export class MatchService {
   private activeMatches = new Map<string, MatchInfo>();
   /** Map from invite code to matchId (short-lived, in-memory is fine) */
   private inviteCodes = new Map<string, string>();
+  /** Emergency mode flag — when true, no new matches or moves are allowed */
+  private emergencyMode = false;
 
   constructor(
     private gameRegistry: GameRegistry,
@@ -67,12 +72,151 @@ export class MatchService {
     private settlement: SettlementService | null = null
   ) {}
 
+  isEmergencyMode(): boolean {
+    return this.emergencyMode;
+  }
+
+  setEmergencyMode(enabled: boolean): void {
+    this.emergencyMode = enabled;
+    log.info({ emergencyMode: enabled }, "Emergency mode changed");
+  }
+
+  /**
+   * Emergency kill switch: end all active/waiting matches as draws,
+   * refund staked matches, notify connected players, and block further play.
+   */
+  async emergencyDrawAll(
+    roomManager: RoomManager
+  ): Promise<{ drawnMatches: number; cancelledMatches: number }> {
+    this.emergencyMode = true;
+    let drawnMatches = 0;
+    let cancelledMatches = 0;
+
+    for (const [matchId, match] of this.activeMatches) {
+      try {
+        if (match.status === MatchStatus.ACTIVE) {
+          match.status = MatchStatus.COMPLETED;
+          match.winner = null;
+          match.completedAt = new Date();
+
+          const transcript = match.orchestrator?.getTranscript();
+          const transcriptHash = transcript
+            ? hashState({ entries: transcript, matchId })
+            : null;
+
+          await updateMatch(matchId, {
+            status: MatchStatus.COMPLETED,
+            winner: null,
+            reason: "emergency_shutdown",
+            completed_at: new Date(),
+            transcript_hash: transcriptHash,
+          });
+
+          // Clean up Redis sessions
+          for (const playerId of match.players) {
+            await deleteGameSession(this.redis, matchId, playerId);
+            await deleteActiveMatchForPlayer(this.redis, playerId);
+          }
+
+          // Notify connected players
+          roomManager.broadcastToAll(matchId, {
+            type: "GAME_OVER",
+            matchId,
+            payload: {
+              winner: null,
+              draw: true,
+              reason: "emergency_shutdown",
+            },
+            sequence: 0,
+            prevHash: "",
+            timestamp: Date.now(),
+          });
+
+          // On-chain draw settlement for staked matches (refunds both players)
+          if (this.settlement && match.stakeWei !== "0" && transcript) {
+            try {
+              await this.settlement.registerMatchPlayers(matchId, match.players);
+              const txHash = await this.settlement.proposeSettlement(matchId, null, transcript);
+              if (txHash) {
+                await updateMatch(matchId, { settlement_tx_hash: txHash });
+              }
+              this.settlement.scheduleFinalization(matchId, config.disputeWindowMs);
+            } catch (err: any) {
+              log.error({ matchId, err: err.message }, "Failed to settle staked match during emergency");
+            }
+          }
+
+          roomManager.removeRoom(matchId);
+          drawnMatches++;
+          log.info({ matchId, gameId: match.gameId, staked: match.stakeWei !== "0" }, "Emergency draw applied");
+
+        } else if (match.status === MatchStatus.WAITING) {
+          match.status = MatchStatus.COMPLETED;
+          match.winner = null;
+          match.completedAt = new Date();
+
+          await updateMatch(matchId, {
+            status: MatchStatus.COMPLETED,
+            winner: null,
+            reason: "emergency_shutdown",
+            completed_at: new Date(),
+          });
+
+          // Clean up invite codes
+          for (const [code, mid] of this.inviteCodes) {
+            if (mid === matchId) {
+              this.inviteCodes.delete(code);
+              break;
+            }
+          }
+
+          // Clean up Redis sessions
+          for (const playerId of match.players) {
+            await deleteGameSession(this.redis, matchId, playerId);
+            await deleteActiveMatchForPlayer(this.redis, playerId);
+          }
+
+          roomManager.broadcastToAll(matchId, {
+            type: "GAME_OVER",
+            matchId,
+            payload: {
+              winner: null,
+              draw: true,
+              reason: "emergency_shutdown",
+            },
+            sequence: 0,
+            prevHash: "",
+            timestamp: Date.now(),
+          });
+
+          roomManager.removeRoom(matchId);
+          cancelledMatches++;
+          log.info({ matchId, gameId: match.gameId }, "Emergency cancel applied (WAITING)");
+        }
+      } catch (err: any) {
+        log.error({ matchId, err: err.message }, "Error during emergency draw");
+      }
+    }
+
+    // Clear all processed matches from memory
+    this.activeMatches.clear();
+
+    log.info(
+      { drawnMatches, cancelledMatches, total: drawnMatches + cancelledMatches },
+      "Emergency draw-all completed"
+    );
+    return { drawnMatches, cancelledMatches };
+  }
+
   async createMatch(
     gameId: string,
     players: string[],
     settings?: Record<string, unknown>,
     stakeWei: string = "0"
   ): Promise<MatchInfo> {
+    if (this.emergencyMode) {
+      throw new Error("Server is in emergency mode — new matches are disabled");
+    }
     const game = this.gameRegistry.get(gameId);
     if (!game) {
       throw new Error(`Unknown game: ${gameId}`);
@@ -191,17 +335,20 @@ export class MatchService {
     return listMatches(limit);
   }
 
-  submitMove(
+  async submitMove(
     matchId: string,
     playerId: string,
     action: Action
-  ): {
+  ): Promise<{
     success: boolean;
     terminal: boolean;
     winner?: string | null;
     reason?: string;
     error?: string;
-  } {
+  }> {
+    if (this.emergencyMode) {
+      return { success: false, terminal: false, error: "Server is in emergency mode" };
+    }
     const match = this.activeMatches.get(matchId);
     if (!match) return { success: false, terminal: false, error: "Match not found" };
     if (!match.orchestrator) return { success: false, terminal: false, error: "No orchestrator" };
@@ -211,6 +358,18 @@ export class MatchService {
 
       // Update last activity timestamp
       match.lastActivityAt = new Date();
+
+      // Persist move incrementally so it survives server restarts
+      const transcript = match.orchestrator.getTranscript();
+      const entry = transcript[transcript.length - 1];
+      await createMatchMove({
+        match_id: matchId,
+        sequence: entry.sequence,
+        player_address: entry.playerAddress,
+        action: JSON.stringify(entry.action),
+        state_hash: entry.stateHash,
+        prev_hash: entry.prevHash,
+      });
 
       if (result.terminal && result.outcome) {
         match.status = MatchStatus.COMPLETED;
@@ -237,7 +396,7 @@ export class MatchService {
     }
   }
 
-  private async persistMatchCompletion(matchId: string, winner: string | null, _reason: string) {
+  private async persistMatchCompletion(matchId: string, winner: string | null, reason: string) {
     try {
       const match = this.activeMatches.get(matchId);
       const transcript = match?.orchestrator?.getTranscript();
@@ -248,23 +407,12 @@ export class MatchService {
       await updateMatch(matchId, {
         status: MatchStatus.COMPLETED,
         winner,
+        reason,
         completed_at: new Date(),
         transcript_hash: transcriptHash,
       });
 
-      // Persist transcript moves
-      if (transcript) {
-        await createMatchMoves(
-          transcript.map((entry) => ({
-            match_id: matchId,
-            sequence: entry.sequence,
-            player_address: entry.playerAddress,
-            action: JSON.stringify(entry.action),
-            state_hash: entry.stateHash,
-            prev_hash: entry.prevHash,
-          }))
-        );
-      }
+      // Moves are already persisted incrementally in submitMove() — no bulk insert needed
 
       // Clean up Redis sessions for all players
       if (match) {
@@ -378,6 +526,7 @@ export class MatchService {
    * Forfeit a match — called when a player times out or abandons.
    */
   async forfeitMatch(matchId: string, forfeitingPlayerId: string): Promise<void> {
+    if (this.emergencyMode) return;
     const match = this.activeMatches.get(matchId);
     if (!match || match.status !== MatchStatus.ACTIVE) return;
 
@@ -386,7 +535,7 @@ export class MatchService {
     match.winner = winner;
     match.completedAt = new Date();
 
-    this.persistMatchCompletion(matchId, winner, `${forfeitingPlayerId} forfeited`);
+    this.persistMatchCompletion(matchId, winner, "forfeit");
     log.info({ matchId, forfeitingPlayerId, winner }, "Match forfeited");
   }
 
@@ -442,6 +591,7 @@ export class MatchService {
         await updateMatch(matchId, {
           status: MatchStatus.COMPLETED,
           winner: null,
+          reason: "Match expired (no opponent joined)",
           completed_at: new Date(),
         });
 
@@ -481,22 +631,12 @@ export class MatchService {
         await updateMatch(matchId, {
           status: MatchStatus.COMPLETED,
           winner: null,
+          reason: "Match abandoned due to inactivity",
           completed_at: new Date(),
           transcript_hash: transcriptHash,
         });
 
-        if (transcript && transcript.length > 0) {
-          await createMatchMoves(
-            transcript.map((entry) => ({
-              match_id: matchId,
-              sequence: entry.sequence,
-              player_address: entry.playerAddress,
-              action: JSON.stringify(entry.action),
-              state_hash: entry.stateHash,
-              prev_hash: entry.prevHash,
-            }))
-          );
-        }
+        // Moves are already persisted incrementally in submitMove() — no bulk insert needed
 
         // Clean up Redis sessions
         for (const playerId of match.players) {
@@ -542,6 +682,9 @@ export class MatchService {
     settings?: Record<string, unknown>,
     stakeWei: string = "0"
   ): Promise<{ ticket: string; matchId?: string; opponent?: string; stakeWei?: string }> {
+    if (this.emergencyMode) {
+      throw new Error("Server is in emergency mode — new matches are disabled");
+    }
     const game = this.gameRegistry.get(gameId);
     if (!game) {
       throw new Error(`Unknown game: ${gameId}`);
@@ -681,6 +824,9 @@ export class MatchService {
     settings?: Record<string, unknown>,
     stakeWei: string = "0"
   ): Promise<{ matchId: string; inviteCode: string; stakeWei: string }> {
+    if (this.emergencyMode) {
+      throw new Error("Server is in emergency mode — new matches are disabled");
+    }
     const game = this.gameRegistry.get(gameId);
     if (!game) {
       throw new Error(`Unknown game: ${gameId}`);
@@ -749,6 +895,7 @@ export class MatchService {
     playerId: string,
     inviteCode: string
   ): Promise<{ matchId: string; wsToken: string; stakeWei: string } | null> {
+    if (this.emergencyMode) return null;
     const matchId = this.inviteCodes.get(inviteCode);
     if (!matchId) return null;
 
@@ -818,6 +965,7 @@ export class MatchService {
    * Transitions the match from WAITING → ACTIVE and creates the orchestrator.
    */
   async activateStakedMatch(matchId: string): Promise<boolean> {
+    if (this.emergencyMode) return false;
     const match = this.activeMatches.get(matchId);
     if (!match || match.status !== MatchStatus.WAITING) return false;
 
@@ -848,5 +996,93 @@ export class MatchService {
 
   async validateWsToken(token: string): Promise<{ matchId: string; playerId: string } | null> {
     return consumeWsToken(this.redis, token);
+  }
+
+  /**
+   * Restore active matches from the database on server startup.
+   * Replays persisted moves to reconstruct orchestrator state so
+   * in-progress games survive server restarts.
+   */
+  async restoreActiveMatches(): Promise<number> {
+    const dbMatches = await findActiveMatches();
+    if (dbMatches.length === 0) return 0;
+
+    let restored = 0;
+    for (const dbMatch of dbMatches) {
+      try {
+        const players: string[] = JSON.parse(dbMatch.players);
+        const stakeWei = dbMatch.stake_wei ?? "0";
+
+        let orchestrator: MatchOrchestrator | null = null;
+        let lastActivityAt = new Date(dbMatch.created_at);
+
+        if (dbMatch.status === "active") {
+          const game = this.gameRegistry.get(dbMatch.game_id);
+          if (!game) {
+            log.warn({ matchId: dbMatch.id, gameId: dbMatch.game_id }, "Cannot restore match: unknown game");
+            continue;
+          }
+
+          const moves = await findMovesByMatchId(dbMatch.id);
+
+          // Derive lastActivityAt from the most recent move (or match creation)
+          if (moves.length > 0) {
+            lastActivityAt = new Date(moves[moves.length - 1].created_at);
+          }
+
+          orchestrator = MatchOrchestrator.fromReplay({
+            game,
+            players,
+            matchId: dbMatch.id,
+            moves: moves.map((m) => ({
+              playerAddress: m.player_address,
+              action: JSON.parse(m.action),
+            })),
+          });
+
+          // Skip if game ended up in a terminal state (e.g., last move completed it)
+          if (orchestrator.isTerminal()) {
+            log.info({ matchId: dbMatch.id }, "Restored match is already terminal, completing");
+            const outcome = orchestrator.getOutcome();
+            await this.persistMatchCompletion(dbMatch.id, outcome.winner, outcome.reason);
+            continue;
+          }
+        }
+
+        const match: MatchInfo = {
+          matchId: dbMatch.id,
+          gameId: dbMatch.game_id,
+          status: dbMatch.status as MatchStatus,
+          players,
+          orchestrator,
+          winner: null,
+          createdAt: new Date(dbMatch.created_at),
+          completedAt: null,
+          lastActivityAt,
+          stakeWei,
+        };
+
+        this.activeMatches.set(dbMatch.id, match);
+
+        // Refresh Redis sessions so reconnecting clients can discover and auth into the match
+        for (const playerId of players) {
+          await storeGameSession(this.redis, dbMatch.id, playerId);
+          await storeActiveMatchForPlayer(this.redis, playerId, dbMatch.id, dbMatch.game_id, stakeWei);
+        }
+
+        restored++;
+        log.info(
+          { matchId: dbMatch.id, gameId: dbMatch.game_id, status: dbMatch.status, players, moves: orchestrator?.getTranscript().length ?? 0 },
+          "Match restored from database"
+        );
+      } catch (err: any) {
+        log.error({ matchId: dbMatch.id, err: err.message }, "Failed to restore match");
+      }
+    }
+
+    if (restored > 0) {
+      log.info({ restored, total: dbMatches.length }, "Active matches restored from database");
+    }
+    return restored;
   }
 }

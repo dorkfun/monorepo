@@ -6,6 +6,7 @@ export default {
   disputeWindowMs: parseInt(process.env.DISPUTE_WINDOW_MS || "300000", 10), // 5 minutes
   matchTimeoutMs: parseInt(process.env.MATCH_TIMEOUT_MS || "300000", 10), // 5 min per move
   staleMatchTimeoutMs: parseInt(process.env.STALE_MATCH_TIMEOUT_MS || "3600000", 10), // 60 minutes
+  adminSecret: process.env.ADMIN_SECRET || "",
 
   // On-chain settlement (optional — disabled if no RPC_URL set)
   rpcUrl: process.env.RPC_URL || "",

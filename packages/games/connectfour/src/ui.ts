@@ -20,8 +20,8 @@ export const ConnectFourUI: GameUISpec = {
 
     const lines: string[] = [];
 
-    // Column headers
-    const header = new Array(COLS)
+    // Column headers (leading space aligns with the │ border)
+    const header = " " + new Array(COLS)
       .fill(0)
       .map((_, i) => ` ${i + 1} `)
       .join(" ");

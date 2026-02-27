@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState, useCallback } from "react";
 import { Box, Text, useInput } from "ink";
 import { formatEther } from "ethers";
 import Spinner from "ink-spinner";
-import { WsMessage, Observation } from "@dorkfun/core";
+import { WsMessage, Observation, formatRelativeTime } from "@dorkfun/core";
 import { getGameUI } from "@dorkfun/game-ui";
 import { colors } from "../theme.js";
 import { ChatPanel, ChatMessage } from "../components/ChatPanel.js";
@@ -38,6 +38,8 @@ export function GameBoard({ matchId, wsToken, playerId, gameId, stakeWei, onGame
   const [inputBuffer, setInputBuffer] = useState("");
   const [chatInput, setChatInput] = useState("");
   const [forfeitConfirm, setForfeitConfirm] = useState(false);
+  const [lastMoveAt, setLastMoveAt] = useState<number | null>(null);
+  const [lastMoveAgo, setLastMoveAgo] = useState("");
   const [wsRef] = useState(() => new GameWebSocket());
 
   // Deposit state
@@ -59,6 +61,15 @@ export function GameBoard({ matchId, wsToken, playerId, gameId, stakeWei, onGame
   }, [isMyTurn]);
 
   useEffect(() => {
+    if (lastMoveAt === null) return;
+    setLastMoveAgo(formatRelativeTime(lastMoveAt));
+    const interval = setInterval(() => {
+      setLastMoveAgo(formatRelativeTime(lastMoveAt));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [lastMoveAt]);
+
+  useEffect(() => {
     const connect = async () => {
       try {
         await wsRef.connect(matchId);
@@ -77,6 +88,7 @@ export function GameBoard({ matchId, wsToken, playerId, gameId, stakeWei, onGame
           if (payload.yourTurn !== undefined) {
             setIsMyTurn(payload.yourTurn);
           }
+          if (payload.lastMoveAt) setLastMoveAt(payload.lastMoveAt);
           if (payload.event === "player_disconnected") {
             setChatMessages((prev) => [...prev, {
               sender: "system",
@@ -91,6 +103,7 @@ export function GameBoard({ matchId, wsToken, playerId, gameId, stakeWei, onGame
           if (payload.observation?.publicData) {
             setPublicData(payload.observation.publicData);
           }
+          setLastMoveAt(Date.now());
         });
 
         wsRef.on("GAME_OVER", (msg: WsMessage) => {
@@ -128,8 +141,10 @@ export function GameBoard({ matchId, wsToken, playerId, gameId, stakeWei, onGame
             yourTurn: boolean;
             currentPlayer: string;
             matchStatus: string;
+            lastMoveAt?: number;
           };
           if (payload.matchStatus === "completed") return;
+          if (payload.lastMoveAt) setLastMoveAt(payload.lastMoveAt);
 
           setIsMyTurn((current) => {
             if (current !== payload.yourTurn) {
@@ -409,6 +424,10 @@ export function GameBoard({ matchId, wsToken, playerId, gameId, stakeWei, onGame
 
           {statusStr && (
             <Text color={colors.warning} bold>{statusStr}</Text>
+          )}
+
+          {lastMoveAgo && (
+            <Text color={colors.dimmed}>last move: {lastMoveAgo}</Text>
           )}
 
           <Text>{""}</Text>

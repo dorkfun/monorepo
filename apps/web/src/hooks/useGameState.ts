@@ -10,6 +10,7 @@ interface GameState {
   gameOver: boolean;
   winner: string | null;
   reason: string;
+  lastMoveAt: number | null;
 }
 
 export function useGameState(matchId: string | null) {
@@ -34,6 +35,7 @@ export function useGameState(matchId: string | null) {
     gameOver: false,
     winner: null,
     reason: "",
+    lastMoveAt: null,
   });
 
   useEffect(() => {
@@ -60,6 +62,7 @@ export function useGameState(matchId: string | null) {
             currentPlayer: obs.currentPlayer,
             players: obs.players,
             turnNumber: obs.turnNumber,
+            lastMoveAt: msg.payload.lastMoveAt ?? prev.lastMoveAt,
           }));
         }
       }),
@@ -71,6 +74,7 @@ export function useGameState(matchId: string | null) {
             publicData: obs.publicData,
             currentPlayer: obs.currentPlayer || msg.payload.nextPlayer,
             turnNumber: obs.turnNumber,
+            lastMoveAt: Date.now(),
           }));
         }
       }),

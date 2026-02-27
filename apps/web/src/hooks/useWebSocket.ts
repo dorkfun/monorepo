@@ -2,20 +2,38 @@ import { useEffect, useRef, useState, useCallback } from "react";
 
 type MessageHandler = (data: unknown) => void;
 
+const MAX_RECONNECT_ATTEMPTS = 5;
+const RECONNECT_BASE_DELAY_MS = 2000;
+
 export function useWebSocket(url: string | null) {
   const wsRef = useRef<WebSocket | null>(null);
   const [connected, setConnected] = useState(false);
   const handlersRef = useRef<Map<string, MessageHandler[]>>(new Map());
+  const reconnectAttemptsRef = useRef(0);
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const intentionalCloseRef = useRef(false);
+  const urlRef = useRef(url);
+  urlRef.current = url;
 
-  useEffect(() => {
-    if (!url) return;
-
-    const ws = new WebSocket(url);
+  const connect = useCallback((targetUrl: string) => {
+    const ws = new WebSocket(targetUrl);
     wsRef.current = ws;
 
-    ws.onopen = () => setConnected(true);
-    ws.onclose = () => setConnected(false);
-    ws.onerror = () => setConnected(false);
+    ws.onopen = () => {
+      reconnectAttemptsRef.current = 0;
+      setConnected(true);
+    };
+
+    ws.onclose = () => {
+      setConnected(false);
+      if (!intentionalCloseRef.current && urlRef.current) {
+        tryReconnect();
+      }
+    };
+
+    ws.onerror = () => {
+      // onclose will fire after onerror, which handles reconnection
+    };
 
     ws.onmessage = (event) => {
       try {
@@ -28,13 +46,42 @@ export function useWebSocket(url: string | null) {
         // Ignore parse errors
       }
     };
+  }, []);
+
+  const tryReconnect = useCallback(() => {
+    if (reconnectAttemptsRef.current >= MAX_RECONNECT_ATTEMPTS) return;
+    if (!urlRef.current) return;
+
+    reconnectAttemptsRef.current++;
+    const delay = RECONNECT_BASE_DELAY_MS * Math.pow(2, reconnectAttemptsRef.current - 1);
+
+    reconnectTimerRef.current = setTimeout(() => {
+      if (urlRef.current && !intentionalCloseRef.current) {
+        connect(urlRef.current);
+      }
+    }, delay);
+  }, [connect]);
+
+  useEffect(() => {
+    if (!url) return;
+
+    intentionalCloseRef.current = false;
+    reconnectAttemptsRef.current = 0;
+    connect(url);
 
     return () => {
-      ws.close();
-      wsRef.current = null;
+      intentionalCloseRef.current = true;
+      if (reconnectTimerRef.current) {
+        clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = null;
+      }
+      if (wsRef.current) {
+        wsRef.current.close();
+        wsRef.current = null;
+      }
       setConnected(false);
     };
-  }, [url]);
+  }, [url, connect]);
 
   const on = useCallback((type: string, handler: MessageHandler) => {
     if (!handlersRef.current.has(type)) {

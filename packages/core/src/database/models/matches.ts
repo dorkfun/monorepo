@@ -61,6 +61,15 @@ export async function listArchivedMatches(options: {
   return { matches, total: Number(countResult?.count ?? 0) };
 }
 
+export async function findActiveMatches(): Promise<Match[]> {
+  return db
+    .selectFrom("matches")
+    .where("status", "in", ["active", "waiting"])
+    .selectAll()
+    .orderBy("created_at", "asc")
+    .execute();
+}
+
 export async function updateMatch(
   id: string,
   update: MatchUpdate
