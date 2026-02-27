@@ -30,8 +30,7 @@ contract EscrowTest is Test {
 
     function setUp() public {
         registry = new GameRegistry();
-        escrow = new Escrow(address(registry));
-        escrow.setSettlementContract(settlement);
+        escrow = new Escrow(address(registry), settlement, 0, address(0), 0);
 
         // Register a game
         gameId = registry.registerGame("Tic-Tac-Toe", keccak256("ttt-v1"), 2, 2);
@@ -197,6 +196,22 @@ contract EscrowTest is Test {
 
         vm.prank(alice);
         vm.expectRevert(abi.encodeWithSelector(Escrow.AlreadyDeposited.selector, alice));
+        escrow.depositStake{value: 1 ether}(matchId);
+    }
+
+    function test_depositStake_revert_afterFundingDeadline() public {
+        address[] memory players = new address[](2);
+        players[0] = alice;
+        players[1] = bob;
+
+        vm.prank(settlement);
+        escrow.createEscrow(matchId, gameId, players, 1 ether);
+
+        // Advance past funding deadline
+        vm.warp(block.timestamp + 7 days + 1);
+
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSelector(Escrow.FundingDeadlinePassed.selector, matchId));
         escrow.depositStake{value: 1 ether}(matchId);
     }
 
@@ -379,6 +394,11 @@ contract EscrowTest is Test {
         escrow.setFee(1001, makeAddr("treasury"));
     }
 
+    function test_setFee_revert_feeWithoutTreasury() public {
+        vm.expectRevert(Escrow.FeeRequiresTreasury.selector);
+        escrow.setFee(250, address(0));
+    }
+
     function test_claimTreasuryFees_revert_noFees() public {
         address treasuryAddr = makeAddr("treasury");
         escrow.setFee(250, treasuryAddr);
@@ -545,6 +565,155 @@ contract EscrowTest is Test {
         escrow.emergencyWithdraw(matchId);
     }
 
+    // --- Emergency withdraw blocks settlement (C-1) ---
+
+    function test_emergencyWithdraw_blocksSettlement() public {
+        _createAndFundEscrow();
+
+        // Advance past escrow timeout
+        vm.warp(block.timestamp + 7 days + 1);
+
+        // Alice emergency withdraws
+        vm.prank(alice);
+        escrow.emergencyWithdraw(matchId);
+
+        // Status should be EmergencyWithdrawn
+        IEscrow.MatchEscrow memory e = escrow.getEscrow(matchId);
+        assertEq(uint8(e.status), uint8(IEscrow.MatchEscrowStatus.EmergencyWithdrawn));
+
+        // Settlement should be blocked
+        vm.prank(settlement);
+        vm.expectRevert(abi.encodeWithSelector(Escrow.NotFunded.selector, matchId));
+        escrow.settleToWinner(matchId, alice);
+    }
+
+    function test_emergencyWithdraw_blocksSettleDraw() public {
+        _createAndFundEscrow();
+
+        vm.warp(block.timestamp + 7 days + 1);
+
+        vm.prank(alice);
+        escrow.emergencyWithdraw(matchId);
+
+        vm.prank(settlement);
+        vm.expectRevert(abi.encodeWithSelector(Escrow.NotFunded.selector, matchId));
+        escrow.settleDraw(matchId);
+    }
+
+    function test_emergencyWithdraw_blocksRefund() public {
+        _createAndFundEscrow();
+
+        vm.warp(block.timestamp + 7 days + 1);
+
+        vm.prank(alice);
+        escrow.emergencyWithdraw(matchId);
+
+        vm.prank(settlement);
+        vm.expectRevert(abi.encodeWithSelector(Escrow.CannotRefund.selector, matchId));
+        escrow.refund(matchId);
+    }
+
+    // --- Emergency withdraw blocks re-deposit (C-2) ---
+
+    function test_emergencyWithdraw_blocksReDeposit() public {
+        _createAndFundEscrow();
+
+        vm.warp(block.timestamp + 7 days + 1);
+
+        vm.prank(alice);
+        escrow.emergencyWithdraw(matchId);
+
+        // Alice tries to re-deposit -- should fail because status is EmergencyWithdrawn
+        vm.prank(alice);
+        vm.expectRevert(
+            abi.encodeWithSelector(Escrow.InvalidEscrowStatus.selector, IEscrow.MatchEscrowStatus.EmergencyWithdrawn)
+        );
+        escrow.depositStake{value: 1 ether}(matchId);
+    }
+
+    // --- Second player can still emergency withdraw (C-1) ---
+
+    function test_emergencyWithdraw_secondPlayerCanWithdraw() public {
+        _createAndFundEscrow();
+
+        vm.warp(block.timestamp + 7 days + 1);
+
+        // Alice emergency withdraws first
+        vm.prank(alice);
+        escrow.emergencyWithdraw(matchId);
+
+        // Bob can also emergency withdraw (status is EmergencyWithdrawn, uses emergencyDeadline)
+        vm.prank(bob);
+        escrow.emergencyWithdraw(matchId);
+
+        assertEq(escrow.pendingWithdrawal(alice), 1 ether);
+        assertEq(escrow.pendingWithdrawal(bob), 1 ether);
+    }
+
+    // --- minPlayers validation (H-1) ---
+
+    function test_createEscrow_revert_tooFewPlayers() public {
+        // Register a game requiring 3 minimum players
+        bytes32 threePlayerGameId = registry.registerGame("ThreePlayerGame", keccak256("3p-v1"), 3, 4);
+
+        address[] memory players = new address[](2);
+        players[0] = alice;
+        players[1] = bob;
+
+        vm.prank(settlement);
+        vm.expectRevert(abi.encodeWithSelector(Escrow.TooFewPlayers.selector, uint256(2), uint8(3)));
+        escrow.createEscrow(matchId, threePlayerGameId, players, 1 ether);
+    }
+
+    // --- Treasury ACL tests (H-4) ---
+
+    function test_claimTreasuryFees_revert_notTreasury() public {
+        address treasuryAddr = makeAddr("treasury");
+        escrow.setFee(250, treasuryAddr); // 2.5%
+
+        _createAndFundEscrow();
+
+        vm.prank(settlement);
+        escrow.settleToWinner(matchId, alice);
+
+        // Random user tries to claim treasury fees
+        address charlie = makeAddr("charlie");
+        vm.prank(charlie);
+        vm.expectRevert(abi.encodeWithSelector(Escrow.NotTreasury.selector, charlie));
+        escrow.claimTreasuryFees();
+    }
+
+    function test_claimTreasuryFees_byTreasury() public {
+        address treasuryAddr = makeAddr("treasury");
+        escrow.setFee(250, treasuryAddr);
+
+        _createAndFundEscrow();
+
+        vm.prank(settlement);
+        escrow.settleToWinner(matchId, alice);
+
+        // Treasury can claim
+        uint256 treasuryBalBefore = treasuryAddr.balance;
+        vm.prank(treasuryAddr);
+        escrow.claimTreasuryFees();
+        assertEq(treasuryAddr.balance, treasuryBalBefore + 0.05 ether);
+    }
+
+    function test_claimTreasuryFees_byOwner() public {
+        address treasuryAddr = makeAddr("treasury");
+        escrow.setFee(250, treasuryAddr);
+
+        _createAndFundEscrow();
+
+        vm.prank(settlement);
+        escrow.settleToWinner(matchId, alice);
+
+        // Owner (this test contract) can claim
+        uint256 treasuryBalBefore = treasuryAddr.balance;
+        escrow.claimTreasuryFees(); // msg.sender == owner()
+        assertEq(treasuryAddr.balance, treasuryBalBefore + 0.05 ether);
+    }
+
     // --- DoS prevention test (C-2) ---
 
     function test_dosPrevented_maliciousReceiver() public {
@@ -582,5 +751,231 @@ contract EscrowTest is Test {
         vm.prank(evilAddr);
         vm.expectRevert(abi.encodeWithSelector(Escrow.PayoutFailed.selector, evilAddr));
         escrow.claimPayout();
+    }
+
+    // --- Emergency withdraw blocked during dispute (C-1 fix) ---
+
+    function test_emergencyWithdraw_revert_duringDispute() public {
+        _createAndFundEscrow();
+
+        // Mark escrow as disputed
+        vm.prank(settlement);
+        escrow.markDisputed(matchId);
+
+        // Advance past emergency deadline
+        vm.warp(block.timestamp + 31 days);
+
+        // Should revert even past deadline — can't withdraw during active dispute
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSelector(Escrow.CannotWithdrawDuringDispute.selector, matchId));
+        escrow.emergencyWithdraw(matchId);
+    }
+
+    // --- Constructor fee/treasury validation (H-1 fix) ---
+
+    function test_constructor_revert_feeWithoutTreasury() public {
+        vm.expectRevert(Escrow.FeeRequiresTreasury.selector);
+        new Escrow(address(registry), settlement, 250, address(0), 0);
+    }
+
+    function test_constructor_feeWithTreasury() public {
+        address treasuryAddr = makeAddr("treasury");
+        Escrow e = new Escrow(address(registry), settlement, 250, treasuryAddr, 0);
+        assertEq(e.feeBps(), 250);
+        assertEq(e.treasury(), treasuryAddr);
+    }
+
+    // --- Fee snapshot tests ---
+
+    function test_feeSnapshot_lockedAtCreation() public {
+        address treasuryAddr = makeAddr("treasury");
+        escrow.setFee(250, treasuryAddr); // 2.5%
+
+        _createAndFundEscrow();
+
+        // Change fee after escrow is created and funded
+        escrow.setFee(500, treasuryAddr); // 5%
+
+        vm.prank(settlement);
+        escrow.settleToWinner(matchId, alice);
+
+        // Should use the snapshotted 2.5%, not the current 5%
+        // 2 ether * 2.5% = 0.05 ether fee, 1.95 ether payout
+        assertEq(escrow.pendingWithdrawal(alice), 1.95 ether);
+        assertEq(escrow.accumulatedFees(), 0.05 ether);
+    }
+
+    // --- Bug 7: setGameRegistry tests ---
+
+    function test_setGameRegistry() public {
+        GameRegistry newRegistry = new GameRegistry();
+        escrow.setGameRegistry(address(newRegistry));
+        assertEq(address(escrow.gameRegistry()), address(newRegistry));
+    }
+
+    function test_setGameRegistry_revert_zeroAddress() public {
+        vm.expectRevert(Escrow.ZeroAddress.selector);
+        escrow.setGameRegistry(address(0));
+    }
+
+    function test_setGameRegistry_revert_notOwner() public {
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, alice));
+        escrow.setGameRegistry(makeAddr("newRegistry"));
+    }
+
+    function test_setGameRegistry_emitsEvent() public {
+        address newRegistry = makeAddr("newRegistry");
+        vm.expectEmit(true, true, true, true);
+        emit IEscrow.GameRegistryUpdated(address(registry), newRegistry);
+        escrow.setGameRegistry(newRegistry);
+    }
+
+    // --- Bug 2: setFee treasury lock tests ---
+
+    function test_setFee_revert_clearTreasuryWithAccumulatedFees() public {
+        address treasuryAddr = makeAddr("treasury");
+        escrow.setFee(250, treasuryAddr);
+
+        _createAndFundEscrow();
+
+        vm.prank(settlement);
+        escrow.settleToWinner(matchId, alice);
+        assertGt(escrow.accumulatedFees(), 0);
+
+        vm.expectRevert(Escrow.CannotClearTreasuryWithAccumulatedFees.selector);
+        escrow.setFee(0, address(0));
+    }
+
+    function test_setFee_clearTreasuryWhenNoFees() public {
+        address treasuryAddr = makeAddr("treasury");
+        escrow.setFee(250, treasuryAddr);
+
+        escrow.setFee(0, address(0));
+        assertEq(escrow.feeBps(), 0);
+        assertEq(escrow.treasury(), address(0));
+    }
+
+    function test_setFee_clearTreasuryAfterFeesCollected() public {
+        address treasuryAddr = makeAddr("treasury");
+        escrow.setFee(250, treasuryAddr);
+
+        _createAndFundEscrow();
+
+        vm.prank(settlement);
+        escrow.settleToWinner(matchId, alice);
+
+        escrow.claimTreasuryFees();
+        assertEq(escrow.accumulatedFees(), 0);
+
+        escrow.setFee(0, address(0));
+        assertEq(escrow.treasury(), address(0));
+    }
+
+    // --- Bug 4: Emergency deadline resets on funding ---
+
+    function test_emergencyDeadline_resetsOnFunding() public {
+        address[] memory players = new address[](2);
+        players[0] = alice;
+        players[1] = bob;
+
+        vm.prank(settlement);
+        escrow.createEscrow(matchId, gameId, players, 1 ether);
+
+        uint256 createTime = block.timestamp;
+
+        // Alice deposits immediately
+        vm.prank(alice);
+        escrow.depositStake{value: 1 ether}(matchId);
+
+        // Warp 3 days
+        vm.warp(createTime + 3 days);
+
+        // Bob deposits at day 3 — triggers full funding
+        vm.prank(bob);
+        escrow.depositStake{value: 1 ether}(matchId);
+
+        uint256 fundingTime = block.timestamp;
+
+        // Emergency deadline should be fundingTime + 7 days, not createTime + 7 days
+        IEscrow.MatchEscrow memory e = escrow.getEscrow(matchId);
+        assertEq(e.emergencyDeadline, fundingTime + 7 days);
+
+        // At createTime + 7 days (day 7), emergency withdraw should FAIL
+        vm.warp(createTime + 7 days + 1);
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSelector(Escrow.EscrowNotTimedOut.selector, matchId));
+        escrow.emergencyWithdraw(matchId);
+
+        // At fundingTime + 7 days (day 10), emergency withdraw should succeed
+        vm.warp(fundingTime + 7 days + 1);
+        vm.prank(alice);
+        escrow.emergencyWithdraw(matchId);
+        assertEq(escrow.pendingWithdrawal(alice), 1 ether);
+    }
+
+    // --- Bug 1: unmarkDisputed tests ---
+
+    function test_unmarkDisputed() public {
+        _createAndFundEscrow();
+
+        vm.prank(settlement);
+        escrow.markDisputed(matchId);
+
+        IEscrow.MatchEscrow memory e1 = escrow.getEscrow(matchId);
+        assertEq(uint8(e1.status), uint8(IEscrow.MatchEscrowStatus.Disputed));
+
+        vm.prank(settlement);
+        escrow.unmarkDisputed(matchId);
+
+        IEscrow.MatchEscrow memory e2 = escrow.getEscrow(matchId);
+        assertEq(uint8(e2.status), uint8(IEscrow.MatchEscrowStatus.Funded));
+    }
+
+    function test_unmarkDisputed_revert_notDisputed() public {
+        _createAndFundEscrow();
+
+        vm.prank(settlement);
+        vm.expectRevert(abi.encodeWithSelector(Escrow.InvalidEscrowStatus.selector, IEscrow.MatchEscrowStatus.Funded));
+        escrow.unmarkDisputed(matchId);
+    }
+
+    function test_unmarkDisputed_revert_notSettlement() public {
+        _createAndFundEscrow();
+
+        vm.prank(settlement);
+        escrow.markDisputed(matchId);
+
+        vm.prank(alice);
+        vm.expectRevert(Escrow.NotSettlement.selector);
+        escrow.unmarkDisputed(matchId);
+    }
+
+    function test_unmarkDisputed_emitsEvent() public {
+        _createAndFundEscrow();
+
+        vm.prank(settlement);
+        escrow.markDisputed(matchId);
+
+        vm.prank(settlement);
+        vm.expectEmit(true, true, true, true);
+        emit IEscrow.EscrowDisputeCleared(matchId);
+        escrow.unmarkDisputed(matchId);
+    }
+
+    function test_feeSnapshot_storedInEscrow() public {
+        address treasuryAddr = makeAddr("treasury");
+        escrow.setFee(250, treasuryAddr);
+
+        address[] memory players = new address[](2);
+        players[0] = alice;
+        players[1] = bob;
+
+        vm.prank(settlement);
+        escrow.createEscrow(matchId, gameId, players, 1 ether);
+
+        IEscrow.MatchEscrow memory e = escrow.getEscrow(matchId);
+        assertEq(e.feeBpsSnapshot, 250);
+        assertEq(e.treasurySnapshot, treasuryAddr);
     }
 }

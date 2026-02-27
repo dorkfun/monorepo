@@ -1,4 +1,7 @@
 // SPDX-License-Identifier: MIT
+/// @title dork.fun - Escrow
+/// @notice Holds and distributes match stakes for the dork.fun competitive gaming platform
+/// @custom:website https://dork.fun
 pragma solidity ^0.8.34;
 
 import {Ownable2Step, Ownable} from "@openzeppelin/contracts/access/Ownable2Step.sol";
@@ -28,9 +31,15 @@ contract Escrow is IEscrow, Ownable2Step, ReentrancyGuard {
     error NotDepositor(address caller);
     error DuplicatePlayer(address player);
     error TooManyPlayers(uint256 count, uint8 max);
+    error TooFewPlayers(uint256 count, uint8 min);
     error NoFeesToClaim();
     error WinnerNotInEscrow(address winner);
     error ZeroWinnerAddress();
+    error NotTreasury(address caller);
+    error FeeRequiresTreasury();
+    error CannotClearTreasuryWithAccumulatedFees();
+    error CannotWithdrawDuringDispute(bytes32 matchId);
+    error FundingDeadlinePassed(bytes32 matchId);
 
     address public settlementContract;
     IGameRegistry public gameRegistry;
@@ -50,9 +59,28 @@ contract Escrow is IEscrow, Ownable2Step, ReentrancyGuard {
         _;
     }
 
-    constructor(address _gameRegistry) Ownable(msg.sender) {
-        if (_gameRegistry == address(0)) revert ZeroAddress();
-        gameRegistry = IGameRegistry(_gameRegistry);
+    constructor(
+        address _gameRegistry,
+        address _settlementContract,
+        uint16 _feeBps,
+        address _treasury,
+        uint256 _minimumStake
+    ) Ownable(msg.sender) {
+        if (_gameRegistry != address(0)) {
+            gameRegistry = IGameRegistry(_gameRegistry);
+        }
+        if (_settlementContract != address(0)) {
+            settlementContract = _settlementContract;
+        }
+        if (_feeBps > 0) {
+            if (_feeBps > 1000) revert FeeTooHigh(_feeBps);
+            if (_treasury == address(0)) revert FeeRequiresTreasury();
+            feeBps = _feeBps;
+        }
+        if (_treasury != address(0)) {
+            treasury = _treasury;
+        }
+        minimumStake = _minimumStake;
     }
 
     function setSettlementContract(address _settlement) external onlyOwner {
@@ -60,6 +88,13 @@ contract Escrow is IEscrow, Ownable2Step, ReentrancyGuard {
         address oldSettlement = settlementContract;
         settlementContract = _settlement;
         emit SettlementContractUpdated(oldSettlement, _settlement);
+    }
+
+    function setGameRegistry(address _gameRegistry) external onlyOwner {
+        if (_gameRegistry == address(0)) revert ZeroAddress();
+        address oldRegistry = address(gameRegistry);
+        gameRegistry = IGameRegistry(_gameRegistry);
+        emit GameRegistryUpdated(oldRegistry, _gameRegistry);
     }
 
     function setMinimumStake(uint256 _minimumStake) external onlyOwner {
@@ -70,6 +105,8 @@ contract Escrow is IEscrow, Ownable2Step, ReentrancyGuard {
 
     function setFee(uint16 _feeBps, address _treasury) external onlyOwner {
         if (_feeBps > 1000) revert FeeTooHigh(_feeBps);
+        if (_feeBps > 0 && _treasury == address(0)) revert FeeRequiresTreasury();
+        if (_treasury == address(0) && accumulatedFees > 0) revert CannotClearTreasuryWithAccumulatedFees();
         uint16 oldFeeBps = feeBps;
         address oldTreasury = treasury;
         feeBps = _feeBps;
@@ -89,12 +126,11 @@ contract Escrow is IEscrow, Ownable2Step, ReentrancyGuard {
             revert BelowMinimumStake(minimumStake, stakePerPlayer);
         }
 
-        // H-4: Validate player count against game definition
         IGameRegistry.GameDefinition memory game = gameRegistry.getGame(gameId);
         if (!game.active) revert GameNotActive(gameId);
+        if (players.length < game.minPlayers) revert TooFewPlayers(players.length, game.minPlayers);
         if (players.length > game.maxPlayers) revert TooManyPlayers(players.length, game.maxPlayers);
 
-        // M-5: Validate no duplicate or zero-address players
         for (uint256 i = 0; i < players.length; i++) {
             if (players[i] == address(0)) revert ZeroAddress();
             for (uint256 j = i + 1; j < players.length; j++) {
@@ -110,7 +146,10 @@ contract Escrow is IEscrow, Ownable2Step, ReentrancyGuard {
             totalStake: 0,
             status: MatchEscrowStatus.None,
             createdAt: block.timestamp,
-            fundingDeadline: block.timestamp + ESCROW_TIMEOUT
+            fundingDeadline: block.timestamp + ESCROW_TIMEOUT,
+            emergencyDeadline: block.timestamp + ESCROW_TIMEOUT,
+            feeBpsSnapshot: feeBps,
+            treasurySnapshot: treasury
         });
 
         emit EscrowCreated(matchId, gameId, stakePerPlayer, players.length);
@@ -122,6 +161,7 @@ contract Escrow is IEscrow, Ownable2Step, ReentrancyGuard {
         if (esc.status != MatchEscrowStatus.None && esc.status != MatchEscrowStatus.Funded) {
             revert InvalidEscrowStatus(esc.status);
         }
+        if (block.timestamp > esc.fundingDeadline) revert FundingDeadlinePassed(matchId);
         if (msg.value != esc.stakePerPlayer) revert WrongStakeAmount(esc.stakePerPlayer, msg.value);
         if (_hasDeposited[matchId][msg.sender]) revert AlreadyDeposited(msg.sender);
         if (!_isPlayer(esc, msg.sender)) revert NotAPlayer(msg.sender);
@@ -133,6 +173,7 @@ contract Escrow is IEscrow, Ownable2Step, ReentrancyGuard {
 
         if (esc.totalStake == esc.stakePerPlayer * esc.players.length) {
             esc.status = MatchEscrowStatus.Funded;
+            esc.emergencyDeadline = block.timestamp + ESCROW_TIMEOUT;
             emit EscrowFullyFunded(matchId);
         }
     }
@@ -143,24 +184,21 @@ contract Escrow is IEscrow, Ownable2Step, ReentrancyGuard {
             revert NotFunded(matchId);
         }
 
-        // H-2: Verify winner is valid
         if (winner == address(0)) revert ZeroWinnerAddress();
         if (!_isPlayer(esc, winner)) revert WinnerNotInEscrow(winner);
 
         esc.status = MatchEscrowStatus.Settled;
 
         uint256 totalPot = esc.totalStake;
-        uint256 fee = (feeBps > 0 && treasury != address(0)) ? (totalPot * feeBps / 10000) : 0;
+        uint256 fee = (esc.feeBpsSnapshot > 0 && esc.treasurySnapshot != address(0))
+            ? (totalPot * esc.feeBpsSnapshot / 10000)
+            : 0;
         uint256 payout = totalPot - fee;
 
-        // M-7: Zero totalStake before crediting
         esc.totalStake = 0;
-
-        // C-2: Credit to pull-payment ledger
         _pendingWithdrawals[winner] += payout;
         emit PayoutCredited(matchId, winner, payout);
 
-        // H-3: Accumulate fees instead of pushing to treasury
         if (fee > 0) {
             accumulatedFees += fee;
             emit TreasuryFeeAccumulated(matchId, fee);
@@ -177,10 +215,8 @@ contract Escrow is IEscrow, Ownable2Step, ReentrancyGuard {
 
         esc.status = MatchEscrowStatus.Settled;
 
-        // M-7: Zero totalStake before crediting
         esc.totalStake = 0;
 
-        // C-2: Credit each depositor to pull-payment ledger
         for (uint256 i = 0; i < esc.players.length; i++) {
             if (_hasDeposited[matchId][esc.players[i]]) {
                 _pendingWithdrawals[esc.players[i]] += esc.stakePerPlayer;
@@ -202,10 +238,8 @@ contract Escrow is IEscrow, Ownable2Step, ReentrancyGuard {
 
         esc.status = MatchEscrowStatus.Refunded;
 
-        // M-7: Zero totalStake before crediting
         esc.totalStake = 0;
 
-        // C-2: Credit each depositor to pull-payment ledger
         for (uint256 i = 0; i < esc.players.length; i++) {
             if (_hasDeposited[matchId][esc.players[i]]) {
                 _pendingWithdrawals[esc.players[i]] += esc.stakePerPlayer;
@@ -229,9 +263,10 @@ contract Escrow is IEscrow, Ownable2Step, ReentrancyGuard {
         emit PayoutClaimed(msg.sender, amount);
     }
 
-    /// @notice Allows treasury to claim accumulated protocol fees.
+    /// @notice Allows treasury or owner to claim accumulated protocol fees.
     function claimTreasuryFees() external nonReentrant {
         if (treasury == address(0)) revert ZeroAddress();
+        if (msg.sender != treasury && msg.sender != owner()) revert NotTreasury(msg.sender);
         uint256 amount = accumulatedFees;
         if (amount == 0) revert NoFeesToClaim();
 
@@ -243,24 +278,52 @@ contract Escrow is IEscrow, Ownable2Step, ReentrancyGuard {
         emit FeeCollected(bytes32(0), treasury, amount);
     }
 
+    /// @notice Extends the emergency withdrawal deadline. Only callable by Settlement.
+    /// Used to prevent emergency withdrawals during active settlement/dispute periods.
+    function extendEmergencyDeadline(bytes32 matchId, uint256 newDeadline) external onlySettlement {
+        MatchEscrow storage esc = _escrows[matchId];
+        if (esc.createdAt == 0) revert EscrowNotFound(matchId);
+        if (newDeadline > esc.emergencyDeadline) {
+            esc.emergencyDeadline = newDeadline;
+        }
+    }
+
     /// @notice Allows a depositor to reclaim their deposit after escrow timeout.
+    /// Transitions status to EmergencyWithdrawn, preventing further settlement or deposits.
     function emergencyWithdraw(bytes32 matchId) external nonReentrant {
         MatchEscrow storage esc = _escrows[matchId];
         if (esc.createdAt == 0) revert EscrowNotFound(matchId);
 
-        // Allow emergency withdraw if:
-        // 1. Funding deadline passed and escrow is not fully funded (status == None), OR
-        // 2. ESCROW_TIMEOUT passed since creation and escrow is not yet settled/refunded
-        bool fundingTimedOut = (esc.status == MatchEscrowStatus.None && block.timestamp > esc.fundingDeadline);
-        bool escrowTimedOut =
-            (block.timestamp > esc.createdAt + ESCROW_TIMEOUT && esc.status != MatchEscrowStatus.Settled
-                && esc.status != MatchEscrowStatus.Refunded);
+        // Block on terminal statuses
+        if (esc.status == MatchEscrowStatus.Settled || esc.status == MatchEscrowStatus.Refunded) {
+            revert EscrowNotTimedOut(matchId);
+        }
 
-        if (!fundingTimedOut && !escrowTimedOut) revert EscrowNotTimedOut(matchId);
+        // Block during active disputes — dispute resolution callback depends on escrow remaining intact
+        if (esc.status == MatchEscrowStatus.Disputed) {
+            revert CannotWithdrawDuringDispute(matchId);
+        }
+
+        // Determine if timeout has been reached
+        bool canWithdraw;
+        if (esc.status == MatchEscrowStatus.None) {
+            // Unfunded: use funding deadline
+            canWithdraw = block.timestamp > esc.fundingDeadline;
+        } else {
+            // Funded, Disputed, or already EmergencyWithdrawn: use emergency deadline
+            canWithdraw = block.timestamp > esc.emergencyDeadline;
+        }
+
+        if (!canWithdraw) revert EscrowNotTimedOut(matchId);
         if (!_hasDeposited[matchId][msg.sender]) revert NotDepositor(msg.sender);
 
         _hasDeposited[matchId][msg.sender] = false;
         esc.totalStake -= esc.stakePerPlayer;
+
+        if (esc.status != MatchEscrowStatus.EmergencyWithdrawn) {
+            esc.status = MatchEscrowStatus.EmergencyWithdrawn;
+            emit EscrowEmergencyWithdrawn(matchId);
+        }
 
         // Credit to pull-payment ledger
         _pendingWithdrawals[msg.sender] += esc.stakePerPlayer;
@@ -273,6 +336,13 @@ contract Escrow is IEscrow, Ownable2Step, ReentrancyGuard {
         if (esc.status != MatchEscrowStatus.Funded) revert NotFunded(matchId);
         esc.status = MatchEscrowStatus.Disputed;
         emit EscrowDisputed(matchId);
+    }
+
+    function unmarkDisputed(bytes32 matchId) external onlySettlement {
+        MatchEscrow storage esc = _escrows[matchId];
+        if (esc.status != MatchEscrowStatus.Disputed) revert InvalidEscrowStatus(esc.status);
+        esc.status = MatchEscrowStatus.Funded;
+        emit EscrowDisputeCleared(matchId);
     }
 
     function getEscrow(bytes32 matchId) external view returns (MatchEscrow memory) {

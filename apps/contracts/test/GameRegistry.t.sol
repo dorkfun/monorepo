@@ -13,6 +13,8 @@ contract GameRegistryTest is Test {
 
     function setUp() public {
         registry = new GameRegistry();
+        // Enable open registration for tests that predate the restriction
+        registry.setOpenRegistration(true);
     }
 
     function test_registerGame() public {
@@ -129,5 +131,46 @@ contract GameRegistryTest is Test {
         vm.prank(bob);
         vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, bob));
         registry.transferOwnership(bob);
+    }
+
+    // --- Registration restriction tests (M-2) ---
+
+    function test_registerGame_revert_restricted() public {
+        registry.setOpenRegistration(false);
+
+        vm.prank(alice);
+        vm.expectRevert(GameRegistry.RegistrationRestricted.selector);
+        registry.registerGame("Test", keccak256("hash"), 2, 2);
+    }
+
+    function test_registerGame_ownerCanAlwaysRegister() public {
+        registry.setOpenRegistration(false);
+
+        // Owner (this test contract) can still register
+        bytes32 gameId = registry.registerGame("Test", keccak256("hash"), 2, 2);
+        assertTrue(registry.isActiveGame(gameId));
+    }
+
+    function test_registerGame_openRegistration() public {
+        registry.setOpenRegistration(true);
+
+        // Anyone can register when open
+        vm.prank(alice);
+        bytes32 gameId = registry.registerGame("Test", keccak256("hash"), 2, 2);
+        assertTrue(registry.isActiveGame(gameId));
+    }
+
+    function test_setOpenRegistration() public {
+        registry.setOpenRegistration(false);
+        assertFalse(registry.openRegistration());
+
+        registry.setOpenRegistration(true);
+        assertTrue(registry.openRegistration());
+    }
+
+    function test_setOpenRegistration_revert_notOwner() public {
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, alice));
+        registry.setOpenRegistration(true);
     }
 }

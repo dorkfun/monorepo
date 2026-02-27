@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Box, Text, useInput } from "ink";
+import { formatEther } from "ethers";
 import { formatAddress } from "@dorkfun/core";
 import { colors } from "../theme.js";
 import { useEnsNames } from "../hooks/useEnsNames.js";
@@ -10,6 +11,7 @@ interface MatchSummary {
   gameId: string;
   status: string;
   players: string[];
+  stakeWei?: string | null;
   createdAt: string;
 }
 
@@ -85,6 +87,11 @@ export function WatchList({ onSelect, onBack }: WatchListProps) {
           <Text color={colors.dimmed}>
             {"  "}[{m.status}]
           </Text>
+          {m.stakeWei && m.stakeWei !== "0" && (
+            <Text color={colors.warning}>
+              {"  "}{formatEther(m.stakeWei)} ETH
+            </Text>
+          )}
         </Box>
       ))}
 

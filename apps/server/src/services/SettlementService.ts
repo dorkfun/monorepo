@@ -3,16 +3,17 @@ import { hashState } from "@dorkfun/core";
 import log from "../logger";
 
 const SETTLEMENT_ABI = [
+  "function createMatch(bytes32 matchId, bytes32 gameId, address[] players, uint256 stakePerPlayer) external",
+  "function cancelMatch(bytes32 matchId) external",
   "function proposeSettlement(bytes32 matchId, address winner, bytes32 transcriptHash) external",
   "function finalizeSettlement(bytes32 matchId) external",
   "function getProposal(bytes32 matchId) external view returns (tuple(bytes32 matchId, address proposedWinner, bytes32 transcriptHash, address proposedBy, uint256 proposedAt, uint256 disputeDeadline, uint8 status))",
-  "function registerMatchPlayers(bytes32 matchId, address[] players) external",
+  "event MatchCreated(bytes32 indexed matchId, bytes32 indexed gameId)",
   "event SettlementProposed(bytes32 indexed matchId, address indexed proposedWinner, bytes32 transcriptHash, uint256 disputeDeadline)",
   "event SettlementFinalized(bytes32 indexed matchId, address indexed winner)",
 ];
 
 const ESCROW_ABI = [
-  "function createEscrow(bytes32 matchId, bytes32 gameId, address[] players, uint256 stakePerPlayer) external",
   "function depositStake(bytes32 matchId) external payable",
   "function getEscrow(bytes32 matchId) external view returns (tuple(bytes32 matchId, bytes32 gameId, address[] players, uint256 stakePerPlayer, uint256 totalStake, uint8 status, uint256 createdAt))",
   "function isFullyFunded(bytes32 matchId) external view returns (bool)",
@@ -29,6 +30,7 @@ export interface SettlementConfig {
   privateKey: string;
   settlementAddress: string;
   escrowAddress: string;
+  gameOnchainIds: Record<string, string>;
 }
 
 /**
@@ -41,6 +43,7 @@ export class SettlementService {
   private settlement: ethers.Contract;
   private escrow: ethers.Contract;
   private pendingFinalizations = new Map<string, ReturnType<typeof setTimeout>>();
+  private gameOnchainIds: Record<string, string>;
   readonly escrowAddress: string;
 
   constructor(private config: SettlementConfig) {
@@ -57,11 +60,20 @@ export class SettlementService {
       this.wallet
     );
     this.escrowAddress = config.escrowAddress;
+    this.gameOnchainIds = config.gameOnchainIds;
 
     log.info(
       { address: this.wallet.address, settlement: config.settlementAddress, escrow: config.escrowAddress },
       "SettlementService initialized"
     );
+  }
+
+  /**
+   * Resolve a server-side game ID (e.g. "chess") to its on-chain bytes32.
+   * Returns null if the game has no on-chain registration (e.g. single-player games).
+   */
+  getGameIdBytes32(gameId: string): string | null {
+    return this.gameOnchainIds[gameId] ?? null;
   }
 
   /**
@@ -136,22 +148,6 @@ export class SettlementService {
   }
 
   /**
-   * Register match players on-chain (required before proposing settlement).
-   */
-  async registerMatchPlayers(matchId: string, players: string[]): Promise<string | null> {
-    try {
-      const matchIdBytes32 = uuidToBytes32(matchId);
-      const tx = await this.settlement.registerMatchPlayers(matchIdBytes32, players);
-      const receipt = await tx.wait();
-      log.info({ matchId, txHash: receipt.hash }, "Match players registered on-chain");
-      return receipt.hash as string;
-    } catch (err: any) {
-      log.error({ matchId, err: err.message }, "Failed to register match players");
-      return null;
-    }
-  }
-
-  /**
    * Get the on-chain proposal status for a match.
    */
   async getProposal(matchId: string): Promise<unknown | null> {
@@ -164,13 +160,13 @@ export class SettlementService {
     }
   }
 
-  // --- Escrow operations ---
+  // --- On-chain match + escrow operations ---
 
   /**
-   * Create an on-chain escrow for a staked match.
-   * Called by the server after match creation.
+   * Create a match on-chain via Settlement.createMatch().
+   * This atomically registers players AND creates the escrow.
    */
-  async createEscrow(
+  async createMatch(
     matchId: string,
     gameIdBytes32: string,
     players: string[],
@@ -180,11 +176,11 @@ export class SettlementService {
       const matchIdBytes32 = uuidToBytes32(matchId);
 
       log.info(
-        { matchId, players, stakePerPlayer },
-        "Creating on-chain escrow"
+        { matchId, gameIdBytes32, players, stakePerPlayer },
+        "Creating on-chain match (players + escrow)"
       );
 
-      const tx = await this.escrow.createEscrow(
+      const tx = await this.settlement.createMatch(
         matchIdBytes32,
         gameIdBytes32,
         players,
@@ -194,12 +190,12 @@ export class SettlementService {
 
       log.info(
         { matchId, txHash: receipt.hash },
-        "Escrow created on-chain"
+        "On-chain match created"
       );
 
       return receipt.hash as string;
     } catch (err: any) {
-      log.error({ matchId, err: err.message }, "Failed to create escrow");
+      log.error({ matchId, err: err.message }, "Failed to create on-chain match");
       return null;
     }
   }

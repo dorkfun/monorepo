@@ -2,7 +2,7 @@ import dotenv from "dotenv";
 dotenv.config({ quiet: true });
 
 import { program } from "commander";
-import { parseEther } from "ethers";
+import { parseEther, formatEther } from "ethers";
 import { formatAddress } from "@dorkfun/core";
 import React from "react";
 import { render } from "ink";
@@ -129,7 +129,10 @@ program
         const qn = result.playerNames || {};
         for (const entry of q.entries) {
           const name = qn[entry.playerId] || entry.displayName;
-          console.log(`    - ${name} (${entry.playerId.slice(0, 10)}...)`);
+          const stakeTag = entry.stakeWei && entry.stakeWei !== "0"
+            ? ` [${formatEther(entry.stakeWei)} ETH]`
+            : "";
+          console.log(`    - ${name} (${entry.playerId.slice(0, 10)}...)${stakeTag}`);
         }
         if (count === 0) {
           console.log("    (empty)");
@@ -170,6 +173,9 @@ program
         console.log(`  ${match.matchId.slice(0, 8)}  ${match.gameId}  ${match.status}`);
         console.log(`    Players: ${match.players.map((p: string) => formatAddress(p, archiveNames[p], "medium")).join(" vs ")}`);
         console.log(`    Outcome: ${outcome}`);
+        if (match.stakeWei && match.stakeWei !== "0") {
+          console.log(`    Stake:   ${formatEther(match.stakeWei)} ETH`);
+        }
         console.log(`    Ended:   ${date}`);
         console.log("");
       }

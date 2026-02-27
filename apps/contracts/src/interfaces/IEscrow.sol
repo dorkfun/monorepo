@@ -1,4 +1,7 @@
 // SPDX-License-Identifier: MIT
+/// @title dork.fun - IEscrow
+/// @notice Interface for the match escrow of the dork.fun competitive gaming platform
+/// @custom:website https://dork.fun
 pragma solidity ^0.8.34;
 
 interface IEscrow {
@@ -7,7 +10,8 @@ interface IEscrow {
         Funded,
         Settled,
         Refunded,
-        Disputed
+        Disputed,
+        EmergencyWithdrawn
     }
 
     struct MatchEscrow {
@@ -19,6 +23,9 @@ interface IEscrow {
         MatchEscrowStatus status;
         uint256 createdAt;
         uint256 fundingDeadline;
+        uint256 emergencyDeadline;
+        uint16 feeBpsSnapshot;
+        address treasurySnapshot;
     }
 
     event EscrowCreated(bytes32 indexed matchId, bytes32 indexed gameId, uint256 stakePerPlayer, uint256 playerCount);
@@ -35,6 +42,9 @@ interface IEscrow {
     event SettlementContractUpdated(address oldAddress, address newAddress);
     event FeeUpdated(uint16 oldFeeBps, uint16 newFeeBps, address oldTreasury, address newTreasury);
     event TreasuryFeeAccumulated(bytes32 indexed matchId, uint256 amount);
+    event EscrowEmergencyWithdrawn(bytes32 indexed matchId);
+    event EscrowDisputeCleared(bytes32 indexed matchId);
+    event GameRegistryUpdated(address oldAddress, address newAddress);
 
     function createEscrow(bytes32 matchId, bytes32 gameId, address[] calldata players, uint256 stakePerPlayer) external;
     function depositStake(bytes32 matchId) external payable;

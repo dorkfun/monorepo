@@ -24,13 +24,14 @@ import {
   removeFromQueue,
   findOpponentInQueue,
   getQueueSize as redisQueueSize,
-  getQueueEntries as redisQueueEntries,
+  getAllQueueEntriesForGame,
   storePendingMatch,
   consumePendingMatch,
   storeGameSession,
   deleteGameSession,
   deleteActiveMatchForPlayer,
   storeActiveMatchForPlayer,
+  type QueueEntry,
 } from "@dorkfun/core";
 import { GameRegistry, MatchOrchestrator } from "@dorkfun/engine";
 import { SettlementService } from "./SettlementService";
@@ -133,9 +134,9 @@ export class MatchService {
           });
 
           // On-chain draw settlement for staked matches (refunds both players)
+          // Players were already registered on-chain by Settlement.createMatch() at match creation
           if (this.settlement && match.stakeWei !== "0" && transcript) {
             try {
-              await this.settlement.registerMatchPlayers(matchId, match.players);
               const txHash = await this.settlement.proposeSettlement(matchId, null, transcript);
               if (txHash) {
                 await updateMatch(matchId, { settlement_tx_hash: txHash });
@@ -289,14 +290,18 @@ export class MatchService {
       await storeActiveMatchForPlayer(this.redis, address, matchId, gameId, effectiveStake);
     }
 
-    // Create on-chain escrow for staked matches (fire and forget, log errors)
+    // Create on-chain match + escrow for staked matches (fire and forget, log errors)
     if (isStaked && this.settlement) {
-      const gameIdBytes32 = SettlementService.matchIdToBytes32(gameId);
-      this.settlement
-        .createEscrow(matchId, gameIdBytes32, players, effectiveStake)
-        .catch((err) =>
-          log.error({ matchId, err: err.message }, "Failed to create on-chain escrow")
-        );
+      const gameIdBytes32 = this.settlement.getGameIdBytes32(gameId);
+      if (gameIdBytes32) {
+        this.settlement
+          .createMatch(matchId, gameIdBytes32, players, effectiveStake)
+          .catch((err) =>
+            log.error({ matchId, err: err.message }, "Failed to create on-chain match")
+          );
+      } else {
+        log.warn({ matchId, gameId }, "No on-chain game ID configured — skipping on-chain match creation");
+      }
     }
 
     this.activeMatches.set(matchId, match);
@@ -500,15 +505,12 @@ export class MatchService {
       }
 
       // On-chain settlement sequence for staked matches
+      // Players were already registered on-chain by Settlement.createMatch() at match creation
       if (this.settlement && match && match.stakeWei !== "0" && transcript) {
-        // 1. Register match players
-        await this.settlement.registerMatchPlayers(matchId, match.players);
-        // 2. Propose settlement
         const txHash = await this.settlement.proposeSettlement(matchId, winner, transcript);
         if (txHash) {
           await updateMatch(matchId, { settlement_tx_hash: txHash });
         }
-        // 3. Schedule finalization after dispute window
         this.settlement.scheduleFinalization(matchId, config.disputeWindowMs);
       } else if (this.settlement && transcript) {
         // Free match: just propose settlement (no escrow involved)
@@ -791,19 +793,20 @@ export class MatchService {
     Array<{
       gameId: string;
       gameName: string;
-      entries: Array<{ playerId: string; displayName: string; ticket: string }>;
+      entries: Array<{ playerId: string; displayName: string; ticket: string; stakeWei: string }>;
     }>
   > {
     const results = [];
     for (const game of this.gameRegistry.list()) {
-      const entries = await redisQueueEntries(this.redis, game.gameId);
+      const entries = await getAllQueueEntriesForGame(this.redis, game.gameId);
       const enriched = await Promise.all(
-        entries.map(async (e) => {
+        entries.map(async (e: QueueEntry) => {
           const player = await findPlayerByAddress(e.playerId);
           return {
             playerId: e.playerId,
             displayName: player?.display_name ?? e.playerId.slice(0, 10),
             ticket: e.ticket,
+            stakeWei: e.stakeWei,
           };
         })
       );
@@ -914,14 +917,18 @@ export class MatchService {
 
     if (isStaked) {
       // Staked private match: stay in WAITING until deposits are confirmed
-      // Create on-chain escrow now that both players are known
+      // Create on-chain match + escrow now that both players are known
       if (this.settlement) {
-        const gameIdBytes32 = SettlementService.matchIdToBytes32(match.gameId);
-        this.settlement
-          .createEscrow(matchId, gameIdBytes32, match.players, match.stakeWei)
-          .catch((err) =>
-            log.error({ matchId, err: err.message }, "Failed to create on-chain escrow")
-          );
+        const gameIdBytes32 = this.settlement.getGameIdBytes32(match.gameId);
+        if (gameIdBytes32) {
+          this.settlement
+            .createMatch(matchId, gameIdBytes32, match.players, match.stakeWei)
+            .catch((err) =>
+              log.error({ matchId, err: err.message }, "Failed to create on-chain match")
+            );
+        } else {
+          log.warn({ matchId, gameId: match.gameId }, "No on-chain game ID configured — skipping on-chain match creation");
+        }
       }
     } else {
       // Free match: activate immediately

@@ -1,4 +1,7 @@
 // SPDX-License-Identifier: MIT
+/// @title dork.fun - GameRegistry
+/// @notice On-chain registry of verified games for the dork.fun competitive gaming platform
+/// @custom:website https://dork.fun
 pragma solidity ^0.8.34;
 
 import {Ownable2Step, Ownable} from "@openzeppelin/contracts/access/Ownable2Step.sol";
@@ -14,9 +17,11 @@ contract GameRegistry is IGameRegistry, Ownable2Step {
     error NotAuthorized();
     error AlreadyInactive();
     error AlreadyActive();
+    error RegistrationRestricted();
 
     mapping(bytes32 => GameDefinition) private _games;
     uint256 private _gameCount;
+    bool public openRegistration;
 
     modifier gameExists(bytes32 gameId) {
         if (_games[gameId].registeredAt == 0) revert GameNotFound(gameId);
@@ -29,6 +34,7 @@ contract GameRegistry is IGameRegistry, Ownable2Step {
         external
         returns (bytes32 gameId)
     {
+        if (!openRegistration && msg.sender != owner()) revert RegistrationRestricted();
         if (bytes(name).length == 0) revert EmptyName();
         if (minPlayers < 2) revert MinPlayersTooLow();
         if (maxPlayers < minPlayers) revert MaxPlayersLessThanMin();
@@ -67,6 +73,11 @@ contract GameRegistry is IGameRegistry, Ownable2Step {
 
         game.active = true;
         emit GameActivated(gameId);
+    }
+
+    function setOpenRegistration(bool _open) external onlyOwner {
+        openRegistration = _open;
+        emit OpenRegistrationUpdated(_open);
     }
 
     function getGame(bytes32 gameId) external view gameExists(gameId) returns (GameDefinition memory) {

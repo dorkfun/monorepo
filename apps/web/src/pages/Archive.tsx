@@ -2,7 +2,9 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { TerminalWindow } from "../components/TerminalWindow";
 import { useEnsNames } from "../hooks/useEnsNames";
+import { useEthPrice } from "../hooks/useEthPrice";
 import { formatAddress } from "../utils/formatAddress";
+import { formatStake } from "../utils/formatStake";
 import * as api from "../utils/api";
 
 interface ArchivedMatch {
@@ -21,6 +23,7 @@ const PAGE_SIZE = 25;
 
 export function Archive() {
   const navigate = useNavigate();
+  const ethPriceUsd = useEthPrice();
   const [matches, setMatches] = useState<ArchivedMatch[]>([]);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(0);
@@ -65,15 +68,6 @@ export function Archive() {
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   const formatAddr = (addr: string) => formatAddress(addr, playerNames[addr]);
-
-  const formatWei = (wei: string) => {
-    try {
-      const eth = (Number(wei) / 1e18).toFixed(6);
-      return eth.replace(/\.?0+$/, "");
-    } catch {
-      return wei + " wei";
-    }
-  };
 
   const formatOutcome = (m: ArchivedMatch) => {
     const reasonSuffix = m.reason ? ` (${m.reason})` : "";
@@ -176,7 +170,7 @@ export function Archive() {
                 </div>
                 {m.stakeWei && m.stakeWei !== "0" && (
                   <div style={{ fontSize: "11px", marginTop: "4px" }}>
-                    <span className="terminal-comment">stake: {formatWei(m.stakeWei!)} ETH</span>
+                    <span style={{ color: "#ffb000" }}>stake: {formatStake(m.stakeWei, ethPriceUsd)}</span>
                   </div>
                 )}
               </div>

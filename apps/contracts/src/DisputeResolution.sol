@@ -1,4 +1,7 @@
 // SPDX-License-Identifier: MIT
+/// @title dork.fun - DisputeResolution
+/// @notice Resolves disputed match outcomes for the dork.fun competitive gaming platform
+/// @custom:website https://dork.fun
 pragma solidity ^0.8.34;
 
 import {Ownable2Step, Ownable} from "@openzeppelin/contracts/access/Ownable2Step.sol";
@@ -16,11 +19,16 @@ contract DisputeResolution is IDisputeResolution, Ownable2Step {
     error DisputeNotOpen(bytes32 matchId);
     error NotResolver();
     error ReviewPeriodNotMet(bytes32 matchId, uint256 earliest);
+    error DisputeNotExpired(bytes32 matchId);
+    error ResolutionPeriodTooShort(uint256 provided, uint256 minimum);
 
     address public settlementContract;
     address public resolver;
 
     uint256 public constant MIN_REVIEW_PERIOD = 1 hours;
+    uint256 public constant DEFAULT_MAX_RESOLUTION_PERIOD = 14 days;
+
+    uint256 public maxResolutionPeriod;
 
     mapping(bytes32 => Dispute) private _disputes;
 
@@ -34,6 +42,7 @@ contract DisputeResolution is IDisputeResolution, Ownable2Step {
         if (_resolver == address(0)) revert ZeroAddress();
         settlementContract = _settlement;
         resolver = _resolver;
+        maxResolutionPeriod = DEFAULT_MAX_RESOLUTION_PERIOD;
     }
 
     function setSettlementContract(address _settlement) external onlyOwner {
@@ -48,6 +57,13 @@ contract DisputeResolution is IDisputeResolution, Ownable2Step {
         address oldResolver = resolver;
         resolver = _resolver;
         emit ResolverUpdated(oldResolver, _resolver);
+    }
+
+    function setMaxResolutionPeriod(uint256 _period) external onlyOwner {
+        if (_period < MIN_REVIEW_PERIOD) revert ResolutionPeriodTooShort(_period, MIN_REVIEW_PERIOD);
+        uint256 oldPeriod = maxResolutionPeriod;
+        maxResolutionPeriod = _period;
+        emit MaxResolutionPeriodUpdated(oldPeriod, _period);
     }
 
     /// @notice Opens a dispute for a match. Called by Settlement contract.
@@ -66,6 +82,7 @@ contract DisputeResolution is IDisputeResolution, Ownable2Step {
             proposalTranscriptHash: proposalTranscriptHash,
             challengerTranscriptHash: challengerTranscriptHash,
             openedAt: block.timestamp,
+            deadline: block.timestamp + maxResolutionPeriod,
             status: DisputeStatus.Open
         });
 
@@ -82,7 +99,6 @@ contract DisputeResolution is IDisputeResolution, Ownable2Step {
         Dispute storage dispute = _disputes[matchId];
         if (dispute.status != DisputeStatus.Open) revert DisputeNotOpen(matchId);
 
-        // H-5: Enforce minimum review period
         uint256 earliest = dispute.openedAt + MIN_REVIEW_PERIOD;
         if (block.timestamp < earliest) revert ReviewPeriodNotMet(matchId, earliest);
 
@@ -96,6 +112,20 @@ contract DisputeResolution is IDisputeResolution, Ownable2Step {
 
         // Callback to settlement to finalize based on dispute outcome
         ISettlementCallback(settlementContract).onDisputeResolved(matchId, proposalValid);
+    }
+
+    /// @notice Expires a dispute that has exceeded its resolution deadline.
+    /// Callable by anyone after the deadline. Defaults to refund (proposalValid = false).
+    function expireDispute(bytes32 matchId) external {
+        Dispute storage dispute = _disputes[matchId];
+        if (dispute.status != DisputeStatus.Open) revert DisputeNotOpen(matchId);
+        if (block.timestamp <= dispute.deadline) revert DisputeNotExpired(matchId);
+
+        dispute.status = DisputeStatus.ResolvedInvalid;
+        emit DisputeExpired(matchId);
+
+        // Default to refund on expiry
+        ISettlementCallback(settlementContract).onDisputeResolved(matchId, false);
     }
 
     function getDispute(bytes32 matchId) external view returns (Dispute memory) {

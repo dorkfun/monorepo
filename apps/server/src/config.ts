@@ -13,6 +13,15 @@ export default {
   serverPrivateKey: process.env.SERVER_PRIVATE_KEY || "",
   settlementAddress: process.env.SETTLEMENT_ADDRESS || "",
   escrowAddress: process.env.ESCROW_ADDRESS || "",
+  gameOnchainIds: (() => {
+    const raw = process.env.GAME_ONCHAIN_IDS || "";
+    if (!raw) return {} as Record<string, string>;
+    try {
+      return JSON.parse(raw) as Record<string, string>;
+    } catch {
+      return {} as Record<string, string>;
+    }
+  })(),
 
   /** True when all on-chain config is present (staking + settlement enabled) */
   get settlementEnabled(): boolean {

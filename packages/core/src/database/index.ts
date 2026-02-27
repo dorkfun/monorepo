@@ -80,6 +80,7 @@ export {
   findOpponentInQueue,
   getQueueSize,
   getQueueEntries,
+  getAllQueueEntriesForGame,
   pruneStaleQueueEntries,
   storePendingMatch,
   consumePendingMatch,

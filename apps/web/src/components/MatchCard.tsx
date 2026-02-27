@@ -1,4 +1,5 @@
 import { formatAddress } from "../utils/formatAddress";
+import { formatStake } from "../utils/formatStake";
 
 interface MatchCardProps {
   matchId: string;
@@ -6,10 +7,12 @@ interface MatchCardProps {
   players: string[];
   playerNames?: Record<string, string | null>;
   status: string;
+  stakeWei?: string | null;
+  ethPriceUsd?: number | null;
   onClick: () => void;
 }
 
-export function MatchCard({ matchId, gameId, players, playerNames, status, onClick }: MatchCardProps) {
+export function MatchCard({ matchId, gameId, players, playerNames, status, stakeWei, ethPriceUsd, onClick }: MatchCardProps) {
   const shortId = matchId.slice(0, 8);
   const isLive = status === "active";
 
@@ -37,6 +40,11 @@ export function MatchCard({ matchId, gameId, players, playerNames, status, onCli
       <div className="terminal-comment" style={{ fontSize: "12px" }}>
         id: {shortId} | players: {players.map((p) => formatAddress(p, playerNames?.[p])).join(" vs ")}
       </div>
+      {stakeWei && stakeWei !== "0" && (
+        <div style={{ fontSize: "11px", marginTop: "4px" }}>
+          <span style={{ color: "#ffb000" }}>stake: {formatStake(stakeWei, ethPriceUsd ?? null)}</span>
+        </div>
+      )}
     </div>
   );
 }

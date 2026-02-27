@@ -1,4 +1,7 @@
 // SPDX-License-Identifier: MIT
+/// @title dork.fun - ISettlement
+/// @notice Interface for match settlement of the dork.fun competitive gaming platform
+/// @custom:website https://dork.fun
 pragma solidity ^0.8.34;
 
 interface ISettlement {
@@ -28,8 +31,15 @@ interface ISettlement {
     event ServerUpdated(address oldServer, address newServer);
     event DisputeResolutionUpdated(address oldAddress, address newAddress);
     event DisputeWindowUpdated(uint256 oldWindow, uint256 newWindow);
+    event DisputeBondUpdated(uint256 oldBond, uint256 newBond);
+    event DisputeBondForfeited(bytes32 indexed matchId, address indexed challenger, uint256 amount);
+    event DisputeBondReturned(bytes32 indexed matchId, address indexed challenger, uint256 amount);
+    event BondRefundClaimed(address indexed recipient, uint256 amount);
+    event MatchCancelled(bytes32 indexed matchId);
+    event SettlementCallbackFailed(bytes32 indexed matchId);
 
     function createMatch(bytes32 matchId, bytes32 gameId, address[] calldata players, uint256 stakePerPlayer) external;
+    function cancelMatch(bytes32 matchId) external;
     function proposeSettlement(bytes32 matchId, address winner, bytes32 transcriptHash) external;
     function finalizeSettlement(bytes32 matchId) external;
     function getProposal(bytes32 matchId) external view returns (SettlementProposal memory);

@@ -119,6 +119,7 @@ export function bindRoutes(app: Express, matchService: MatchService, roomManager
       status: m.status,
       players: m.players,
       playerNames,
+      stakeWei: m.stakeWei !== "0" ? m.stakeWei : null,
       createdAt: m.createdAt.toISOString(),
     }));
     res.json({ matches });

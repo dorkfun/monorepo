@@ -46,8 +46,14 @@ import { createHttpWsServer } from "./ws/server";
       privateKey: config.serverPrivateKey,
       settlementAddress: config.settlementAddress,
       escrowAddress: config.escrowAddress,
+      gameOnchainIds: config.gameOnchainIds,
     });
-    log.info("On-chain settlement + staking enabled");
+    const configuredGames = Object.keys(config.gameOnchainIds);
+    if (configuredGames.length > 0) {
+      log.info({ games: configuredGames }, "On-chain settlement + staking enabled");
+    } else {
+      log.info("On-chain settlement enabled (no GAME_ONCHAIN_IDS configured — staked matches will skip escrow creation)");
+    }
   } else {
     log.info("On-chain settlement disabled (missing RPC_URL / keys / contract addresses)");
   }

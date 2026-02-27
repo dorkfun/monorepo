@@ -1,18 +1,22 @@
+import { formatStake } from "../utils/formatStake";
+
 interface QueueGame {
   gameId: string;
   gameName: string;
   entries: Array<{
     playerId: string;
     displayName: string;
+    stakeWei?: string;
   }>;
 }
 
 interface QueueStatusProps {
   queues: QueueGame[];
   playerNames?: Record<string, string | null>;
+  ethPriceUsd?: number | null;
 }
 
-export function QueueStatus({ queues, playerNames }: QueueStatusProps) {
+export function QueueStatus({ queues, playerNames, ethPriceUsd }: QueueStatusProps) {
   const totalWaiting = queues.reduce((sum, q) => sum + q.entries.length, 0);
 
   return (
@@ -40,6 +44,11 @@ export function QueueStatus({ queues, playerNames }: QueueStatusProps) {
                     style={{ fontSize: "12px", marginLeft: "12px" }}
                   >
                     {playerNames?.[e.playerId] || e.displayName} ({e.playerId.slice(0, 8)}...)
+                    {e.stakeWei && e.stakeWei !== "0" && (
+                      <span style={{ color: "#ffb000", marginLeft: "8px" }}>
+                        [{formatStake(e.stakeWei, ethPriceUsd ?? null)}]
+                      </span>
+                    )}
                   </div>
                 ))}
               </div>

@@ -195,6 +195,31 @@ export async function getQueueEntries(
 }
 
 /**
+ * Get all queue entries for a game across ALL stake levels.
+ * Scans for queue:{gameId}:* keys to discover all stake-scoped queues.
+ */
+export async function getAllQueueEntriesForGame(
+  r: Redis,
+  gameId: string
+): Promise<QueueEntry[]> {
+  const pattern = QUEUE_PREFIX + gameId + ":*";
+  const keys = await r.keys(pattern);
+  const allEntries: QueueEntry[] = [];
+  for (const key of keys) {
+    const tickets = await r.smembers(key);
+    for (const ticket of tickets) {
+      const data = await r.get(QUEUE_ENTRY_PREFIX + ticket);
+      if (!data) {
+        await r.srem(key, ticket);
+        continue;
+      }
+      allEntries.push(JSON.parse(data));
+    }
+  }
+  return allEntries;
+}
+
+/**
  * Sweep all queue sets and remove tickets whose qentry: detail has expired.
  * Returns the total number of pruned entries.
  */

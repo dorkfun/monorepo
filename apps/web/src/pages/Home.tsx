@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { TerminalWindow } from "../components/TerminalWindow";
 import { MatchCard } from "../components/MatchCard";
 import { QueueStatus } from "../components/QueueStatus";
+import { useEthPrice } from "../hooks/useEthPrice";
 import * as api from "../utils/api";
 
 interface MatchSummary {
@@ -10,6 +11,7 @@ interface MatchSummary {
   gameId: string;
   players: string[];
   status: string;
+  stakeWei?: string | null;
 }
 
 interface GameInfo {
@@ -22,6 +24,7 @@ interface GameInfo {
 
 export function Home() {
   const navigate = useNavigate();
+  const ethPriceUsd = useEthPrice();
   const [matches, setMatches] = useState<MatchSummary[]>([]);
   const [queues, setQueues] = useState<any[]>([]);
   const [games, setGames] = useState<GameInfo[]>([]);
@@ -66,7 +69,7 @@ export function Home() {
       <div style={{ textAlign: "center", marginBottom: "32px" }}>
         <h1 className="page-title">DORK.FUN</h1>
         <p className="terminal-comment" style={{ marginTop: "8px" }}>
-          play games with other humans, bots, AI agents, and more - with optional on-chain betting and settlement
+          Play games with other humans, bots, AI agents, and more - optional on-chain betting and settlement
         </p>
       </div>
 
@@ -97,6 +100,8 @@ export function Home() {
                   players={m.players}
                   playerNames={playerNames}
                   status={m.status}
+                  stakeWei={m.stakeWei}
+                  ethPriceUsd={ethPriceUsd}
                   onClick={() => navigate(`/watch/${m.matchId}`)}
                 />
               ))}
@@ -112,7 +117,7 @@ export function Home() {
               $ loading queues<span className="cursor-blink">_</span>
             </span>
           ) : (
-            <QueueStatus queues={queues} playerNames={playerNames} />
+            <QueueStatus queues={queues} playerNames={playerNames} ethPriceUsd={ethPriceUsd} />
           )}
         </TerminalWindow>
       </div>
@@ -182,6 +187,19 @@ export function Home() {
           </div>
         </div>
       </div>
+
+      {!loading && games.length > 0 && (
+        <div style={{ marginTop: "16px", textAlign: "center", fontSize: "11px" }}>
+          <span className="terminal-comment">available games: </span>
+          {games.map((g, i) => (
+            <span key={g.id}>
+              <span style={{ color: "#00ffff" }}>{g.name}</span>
+              <span style={{ color: "#666" }}> ({g.minPlayers === g.maxPlayers ? `${g.minPlayers}p` : `${g.minPlayers}–${g.maxPlayers}p`})</span>
+              {i < games.length - 1 && <span style={{ color: "#333" }}> | </span>}
+            </span>
+          ))}
+        </div>
+      )}
 
       <div className="nav-links" style={{ marginTop: "16px", textAlign: "center" }}>
         <span
