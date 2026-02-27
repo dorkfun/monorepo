@@ -1,0 +1,26 @@
+{
+  "name": "@dorkfun/game-ui",
+  "version": "0.0.1",
+  "description": "Game UI registry — maps gameId to GameUISpec",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@dorkfun/core": "workspace:*",
+    "@dorkfun/engine": "workspace:*",
+    "@dorkfun/game-chess": "workspace:*",
+    "@dorkfun/game-sudoku": "workspace:*",
+    "@dorkfun/game-tictactoe": "workspace:*",
+    "@dorkfun/game-connectfour": "workspace:*",
+    "@dorkfun/game-checkers": "workspace:*",
+    "@dorkfun/game-othello": "workspace:*",
+    "@dorkfun/game-hex": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "typescript": "^5.9.3"
+  }
+}

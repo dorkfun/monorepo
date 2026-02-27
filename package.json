@@ -1,0 +1,11 @@
+{
+  "name": "dorkfun",
+  "packageManager": "pnpm@10.24.0",
+  "scripts": {
+    "dev": "pnpm -r dev",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "clean": "pnpm -r clean",
+    "test": "pnpm -r test"
+  }
+}

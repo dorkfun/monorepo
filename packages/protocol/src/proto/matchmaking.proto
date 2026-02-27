@@ -1,0 +1,82 @@
+syntax = "proto3";
+package dorkfun.matchmaking;
+import "common.proto";
+
+service Matchmaking {
+  rpc JoinQueue(JoinQueueRequest) returns (JoinQueueResponse);
+  rpc LeaveQueue(LeaveQueueRequest) returns (LeaveQueueResponse);
+  rpc WatchQueue(WatchQueueRequest) returns (stream QueueEvent);
+  rpc CreatePrivateMatch(CreatePrivateMatchRequest) returns (CreatePrivateMatchResponse);
+  rpc AcceptMatch(AcceptMatchRequest) returns (AcceptMatchResponse);
+}
+
+message JoinQueueRequest {
+  dorkfun.common.PlayerId player = 1;
+  dorkfun.common.GameId game = 2;
+  bytes auth_signature = 3;
+  optional string stake_amount = 4;
+}
+
+message JoinQueueResponse {
+  string queue_ticket = 1;
+}
+
+message LeaveQueueRequest {
+  string queue_ticket = 1;
+}
+
+message LeaveQueueResponse {
+  bool success = 1;
+}
+
+message WatchQueueRequest {
+  string queue_ticket = 1;
+}
+
+message QueueEvent {
+  oneof event {
+    QueuePositionUpdate position_update = 1;
+    MatchFound match_found = 2;
+    QueueCancelled cancelled = 3;
+  }
+}
+
+message QueuePositionUpdate {
+  int32 position = 1;
+  int32 estimated_wait_seconds = 2;
+}
+
+message MatchFound {
+  dorkfun.common.MatchId match_id = 1;
+  dorkfun.common.PlayerId opponent = 2;
+  string websocket_url = 3;
+  string websocket_token = 4;
+}
+
+message QueueCancelled {
+  string reason = 1;
+}
+
+message CreatePrivateMatchRequest {
+  dorkfun.common.PlayerId player = 1;
+  dorkfun.common.GameId game = 2;
+  bytes auth_signature = 3;
+  optional string stake_amount = 4;
+}
+
+message CreatePrivateMatchResponse {
+  dorkfun.common.MatchId match_id = 1;
+  string invite_code = 2;
+}
+
+message AcceptMatchRequest {
+  dorkfun.common.PlayerId player = 1;
+  string invite_code = 2;
+  bytes auth_signature = 3;
+}
+
+message AcceptMatchResponse {
+  dorkfun.common.MatchId match_id = 1;
+  string websocket_url = 2;
+  string websocket_token = 3;
+}

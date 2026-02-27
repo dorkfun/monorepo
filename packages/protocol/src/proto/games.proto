@@ -1,0 +1,48 @@
+syntax = "proto3";
+package dorkfun.games;
+import "common.proto";
+
+service GameRegistry {
+  rpc ListGames(ListGamesRequest) returns (ListGamesResponse);
+  rpc GetGame(GetGameRequest) returns (GameInfo);
+  rpc GetLeaderboard(GetLeaderboardRequest) returns (LeaderboardResponse);
+}
+
+message ListGamesRequest {}
+
+message ListGamesResponse {
+  repeated GameInfo games = 1;
+}
+
+message GetGameRequest {
+  dorkfun.common.GameId game_id = 1;
+}
+
+message GameInfo {
+  dorkfun.common.GameId game_id = 1;
+  string name = 2;
+  string description = 3;
+  int32 min_players = 4;
+  int32 max_players = 5;
+  bool supports_spectators = 6;
+  string rules_markdown = 7;
+  int32 active_matches = 8;
+  int32 players_in_queue = 9;
+}
+
+message GetLeaderboardRequest {
+  dorkfun.common.GameId game_id = 1;
+  int32 limit = 2;
+}
+
+message LeaderboardResponse {
+  repeated LeaderboardEntry entries = 1;
+}
+
+message LeaderboardEntry {
+  dorkfun.common.PlayerId player = 1;
+  int32 rating = 2;
+  int32 wins = 3;
+  int32 losses = 4;
+  int32 draws = 5;
+}

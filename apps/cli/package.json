@@ -1,0 +1,43 @@
+{
+  "name": "@dorkfun/cli",
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "version": "0.0.1",
+  "description": "dork.fun CLI client: terminal UI for agents and users",
+  "type": "module",
+  "bin": {
+    "dork": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "ts-node src/index.ts",
+    "test": "if ls src/**/*.spec.ts >/dev/null 2>&1; then mocha --require ts-node/register --recursive --parallel './src/**/*.spec.ts'; else echo 'No test files found'; fi"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@dorkfun/agent-sdk": "workspace:*",
+    "@dorkfun/core": "workspace:*",
+    "@dorkfun/game-ui": "workspace:*",
+    "@dorkfun/protocol": "workspace:*",
+    "commander": "^13.1.0",
+    "dotenv": "^17.2.3",
+    "ethers": "^6.16.0",
+    "ink": "^5.1.0",
+    "ink-spinner": "^5.0.0",
+    "ink-text-input": "^6.0.0",
+    "react": "^18.3.1",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^24.10.1",
+    "@types/react": "^18.3.18",
+    "@types/ws": "^8.5.13",
+    "mocha": "^11.7.5",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
+  }
+}

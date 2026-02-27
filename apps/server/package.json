@@ -1,0 +1,40 @@
+{
+  "name": "@dorkfun/server",
+  "version": "0.0.1",
+  "description": "dork.fun game server: gRPC + WebSocket",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "ts-node src/index.ts",
+    "test": "if ls src/**/*.spec.ts >/dev/null 2>&1; then mocha --require ts-node/register --recursive --parallel './src/**/*.spec.ts'; else echo 'No test files found'; fi"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@dorkfun/core": "workspace:*",
+    "@dorkfun/engine": "workspace:*",
+    "@dorkfun/game-chess": "workspace:*",
+    "@dorkfun/game-sudoku": "workspace:*",
+    "@dorkfun/game-tictactoe": "workspace:*",
+    "@dorkfun/game-connectfour": "workspace:*",
+    "@dorkfun/game-checkers": "workspace:*",
+    "@dorkfun/game-othello": "workspace:*",
+    "@dorkfun/game-hex": "workspace:*",
+    "@dorkfun/protocol": "workspace:*",
+    "bunyan": "^1.8.15",
+    "dotenv": "^17.2.3",
+    "ethers": "^6.16.0",
+    "express": "^5.2.1",
+    "ioredis": "^5.8.2",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/bunyan": "^1.8.11",
+    "@types/express": "^5.0.6",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^24.10.1",
+    "@types/ws": "^8.5.13",
+    "mocha": "^11.7.5",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
+  }
+}

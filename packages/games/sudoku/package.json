@@ -1,0 +1,23 @@
+{
+  "name": "@dorkfun/game-sudoku",
+  "version": "0.0.1",
+  "description": "Sudoku game module for dork.fun",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "mocha --require ts-node/register --recursive --parallel './src/**/*.spec.ts'"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@dorkfun/core": "workspace:*",
+    "@dorkfun/engine": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^24.10.1",
+    "mocha": "^11.7.5",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
+  }
+}

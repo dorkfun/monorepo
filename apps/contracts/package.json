@@ -1,0 +1,11 @@
+{
+  "name": "@dorkfun/contracts",
+  "version": "0.0.1",
+  "description": "dork.fun EVM smart contracts: escrow, settlement, dispute resolution",
+  "scripts": {
+    "build": "forge build",
+    "test": "forge test -vv",
+    "clean": "forge clean"
+  },
+  "license": "MIT"
+}

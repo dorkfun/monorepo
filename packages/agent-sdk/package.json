@@ -1,0 +1,24 @@
+{
+  "name": "@dorkfun/agent-sdk",
+  "version": "0.0.1",
+  "description": "Headless SDK for connecting AI agents to dork.fun games",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "if ls src/**/*.spec.ts >/dev/null 2>&1; then mocha --require ts-node/register --recursive --parallel './src/**/*.spec.ts'; else echo 'No test files found'; fi"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@dorkfun/core": "workspace:*",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^24.10.1",
+    "@types/ws": "^8.5.13",
+    "mocha": "^11.7.5",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
+  }
+}

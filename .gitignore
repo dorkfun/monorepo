@@ -1,0 +1,16 @@
+.DS_Store
+.vscode
+.env
+node_modules
+dist
+
+# Foundry
+apps/contracts/out
+apps/contracts/cache
+apps/contracts/lib
+
+# Protocol generated
+packages/protocol/src/generated
+
+# Build artifacts
+*.tsbuildinfo

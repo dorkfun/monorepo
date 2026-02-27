@@ -1,0 +1,33 @@
+syntax = "proto3";
+package dorkfun.common;
+
+message PlayerId {
+  string address = 1;
+  string display_name = 2;
+}
+
+message GameId {
+  string id = 1;
+}
+
+message MatchId {
+  string id = 1;
+}
+
+enum MatchStatus {
+  MATCH_STATUS_UNKNOWN = 0;
+  MATCH_STATUS_WAITING = 1;
+  MATCH_STATUS_ACTIVE = 2;
+  MATCH_STATUS_COMPLETED = 3;
+  MATCH_STATUS_SETTLED = 4;
+  MATCH_STATUS_DISPUTED = 5;
+}
+
+message MatchSummary {
+  MatchId match_id = 1;
+  GameId game_id = 2;
+  repeated PlayerId players = 3;
+  MatchStatus status = 4;
+  int64 created_at = 5;
+  optional PlayerId winner = 6;
+}

@@ -1,0 +1,49 @@
+syntax = "proto3";
+package dorkfun.history;
+import "common.proto";
+
+service MatchHistory {
+  rpc GetMatch(GetMatchRequest) returns (MatchDetail);
+  rpc ListMatches(ListMatchesRequest) returns (ListMatchesResponse);
+  rpc GetTranscript(GetTranscriptRequest) returns (TranscriptResponse);
+}
+
+message GetMatchRequest {
+  dorkfun.common.MatchId match_id = 1;
+}
+
+message MatchDetail {
+  dorkfun.common.MatchSummary summary = 1;
+  repeated TranscriptEntry moves = 2;
+  optional string settlement_tx_hash = 3;
+}
+
+message ListMatchesRequest {
+  optional dorkfun.common.PlayerId player = 1;
+  optional dorkfun.common.GameId game = 2;
+  int32 limit = 3;
+  int32 offset = 4;
+}
+
+message ListMatchesResponse {
+  repeated dorkfun.common.MatchSummary matches = 1;
+  int32 total = 2;
+}
+
+message GetTranscriptRequest {
+  dorkfun.common.MatchId match_id = 1;
+}
+
+message TranscriptResponse {
+  repeated TranscriptEntry entries = 1;
+  string root_hash = 2;
+}
+
+message TranscriptEntry {
+  int32 sequence = 1;
+  string player_address = 2;
+  bytes action = 3;
+  bytes state_hash = 4;
+  bytes prev_hash = 5;
+  int64 timestamp = 6;
+}

@@ -1,0 +1,311 @@
+.terminal-window {
+  background: #0d0d0d;
+  border: 1px solid #333;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 0 20px rgba(0, 255, 65, 0.1);
+}
+
+.terminal-titlebar {
+  background: #1a1a1a;
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid #333;
+}
+
+.terminal-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+}
+
+.terminal-dot.red { background: #ff5f56; }
+.terminal-dot.yellow { background: #ffbd2e; }
+.terminal-dot.green { background: #27c93f; }
+
+.terminal-title {
+  color: #666;
+  font-size: 12px;
+  margin-left: 8px;
+}
+
+.terminal-body {
+  padding: 16px;
+  min-height: 200px;
+}
+
+.terminal-body::-webkit-scrollbar {
+  width: 6px;
+}
+
+.terminal-body::-webkit-scrollbar-track {
+  background: #0d0d0d;
+}
+
+.terminal-body::-webkit-scrollbar-thumb {
+  background: #333;
+  border-radius: 3px;
+}
+
+.terminal-body::-webkit-scrollbar-thumb:hover {
+  background: #555;
+}
+
+.terminal-line {
+  display: block;
+  margin-bottom: 2px;
+}
+
+.terminal-prompt {
+  color: #00ff41;
+}
+
+.terminal-comment {
+  color: #666;
+}
+
+.terminal-value {
+  color: #ffb000;
+}
+
+.terminal-error {
+  color: #ff3333;
+}
+
+.terminal-highlight {
+  color: #00ffff;
+}
+
+.chat-spectator {
+  color: #888;
+}
+
+/* Chess piece colors */
+
+.chess-white {
+  color: #00ffff;
+}
+
+.chess-black {
+  color: #ffb000;
+}
+
+.chess-last-move {
+  text-shadow: 0 0 6px rgba(0, 255, 65, 0.6);
+  background: rgba(0, 255, 65, 0.12);
+  border-radius: 2px;
+}
+
+/* Tic-tac-toe mark colors */
+
+.ttt-x {
+  color: #00ffff;
+}
+
+.ttt-o {
+  color: #ffb000;
+}
+
+/* Connect Four piece colors */
+
+.c4-r {
+  color: #00ffff;
+}
+
+.c4-y {
+  color: #ffb000;
+}
+
+/* Othello piece colors */
+
+.oth-b {
+  color: #00ffff;
+}
+
+.oth-w {
+  color: #ffb000;
+}
+
+/* Hex piece colors */
+
+.hex-r {
+  color: #00ffff;
+}
+
+.hex-b {
+  color: #ffb000;
+}
+
+/* Checkers piece colors */
+
+.ck-black {
+  color: #00ffff;
+}
+
+.ck-white {
+  color: #ffb000;
+}
+
+/* Sudoku cell colors */
+
+.sudoku-clue {
+  color: #00ff41;
+  font-weight: bold;
+}
+
+.sudoku-player {
+  color: #00ffff;
+}
+
+.sudoku-error {
+  color: #ff3333;
+  text-shadow: 0 0 4px rgba(255, 51, 51, 0.5);
+}
+
+/* Leaderboard */
+
+.leaderboard-row {
+  padding: 2px 0;
+  transition: background 0.1s;
+}
+
+.leaderboard-row.selected {
+  background: rgba(0, 255, 65, 0.1);
+  color: #00ff41;
+}
+
+.leaderboard-tab {
+  cursor: pointer;
+  padding-bottom: 4px;
+  border-bottom: 1px solid transparent;
+  color: #666;
+  transition: color 0.2s, border-color 0.2s;
+}
+
+.leaderboard-tab.active {
+  color: #00ff41;
+  border-bottom-color: #00ff41;
+  font-weight: bold;
+}
+
+/* Markdown body (README docs page) */
+
+.markdown-body {
+  color: #ccc;
+  line-height: 1.7;
+  word-wrap: break-word;
+}
+
+.markdown-body h1,
+.markdown-body h2,
+.markdown-body h3,
+.markdown-body h4,
+.markdown-body h5,
+.markdown-body h6 {
+  color: #00ff41;
+  margin-top: 24px;
+  margin-bottom: 12px;
+  font-weight: bold;
+  border-bottom: 1px solid #222;
+  padding-bottom: 6px;
+}
+
+.markdown-body h1 { font-size: 1.6em; }
+.markdown-body h2 { font-size: 1.3em; }
+.markdown-body h3 { font-size: 1.1em; border-bottom: none; }
+.markdown-body h4,
+.markdown-body h5,
+.markdown-body h6 { font-size: 1em; border-bottom: none; }
+
+.markdown-body p {
+  margin: 12px 0;
+}
+
+.markdown-body a {
+  color: #00ffff;
+  text-decoration: none;
+  border-bottom: 1px solid #333;
+  transition: border-color 0.2s;
+}
+
+.markdown-body a:hover {
+  border-bottom-color: #00ffff;
+}
+
+.markdown-body code {
+  background: #1a1a1a;
+  color: #ffb000;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 0.9em;
+}
+
+.markdown-body pre {
+  background: #1a1a1a;
+  border: 1px solid #333;
+  border-radius: 4px;
+  padding: 12px;
+  overflow-x: auto;
+  margin: 12px 0;
+}
+
+.markdown-body pre code {
+  background: none;
+  color: #ccc;
+  padding: 0;
+}
+
+.markdown-body ul,
+.markdown-body ol {
+  padding-left: 24px;
+  margin: 8px 0;
+}
+
+.markdown-body li {
+  margin: 4px 0;
+}
+
+.markdown-body li::marker {
+  color: #00ff41;
+}
+
+.markdown-body blockquote {
+  border-left: 3px solid #00ff41;
+  margin: 12px 0;
+  padding: 4px 16px;
+  color: #999;
+}
+
+.markdown-body table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 12px 0;
+}
+
+.markdown-body th,
+.markdown-body td {
+  border: 1px solid #333;
+  padding: 6px 12px;
+  text-align: left;
+}
+
+.markdown-body th {
+  background: #1a1a1a;
+  color: #00ff41;
+}
+
+.markdown-body hr {
+  border: none;
+  border-top: 1px solid #333;
+  margin: 24px 0;
+}
+
+.markdown-body img {
+  max-width: 100%;
+}
+
+.markdown-body strong {
+  color: #fff;
+}
