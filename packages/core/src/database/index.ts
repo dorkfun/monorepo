@@ -49,6 +49,7 @@ export type { LeaderboardEntry, LeaderboardSortBy } from "./models/playerGameSta
 export {
   findMatchById,
   findActiveMatches,
+  findCompletedStakedMatches,
   listMatches,
   listArchivedMatches,
   createMatch as createMatchRecord,

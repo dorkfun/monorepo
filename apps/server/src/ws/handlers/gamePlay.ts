@@ -287,11 +287,23 @@ export function handleGamePlayConnection(
           clearInterval(poller);
           depositPollers.delete(matchId);
 
+          // Cancel on-chain match to trigger escrow refunds for any depositors
+          if (settlement) {
+            settlement.cancelMatch(matchId).catch((err) =>
+              log.error({ matchId, err: err.message }, "Failed to cancel on-chain match on deposit timeout")
+            );
+          }
+
+          // Mark match as completed/cancelled and clean up Redis state
+          matchService.completeMatchAsCancelled(matchId, "Deposit timeout").catch((err) =>
+            log.error({ matchId, err: err.message }, "Failed to mark match as cancelled on deposit timeout")
+          );
+
           roomManager.broadcastToAll(matchId, {
             type: "ERROR",
             matchId,
             payload: {
-              error: "Deposit timeout — match cancelled. Any deposited funds will be refunded automatically from the escrow contract.",
+              error: "Deposit timeout — match cancelled. Deposited funds are being refunded on-chain.",
             },
             sequence: 0,
             prevHash: "",
@@ -299,7 +311,7 @@ export function handleGamePlayConnection(
           });
           roomManager.removeRoom(matchId);
 
-          log.warn({ matchId }, "Deposit timeout — staked match cancelled");
+          log.warn({ matchId }, "Deposit timeout — staked match cancelled, on-chain refund triggered");
         }
       } catch (err: any) {
         log.error({ matchId, err: err.message }, "Deposit poller error");

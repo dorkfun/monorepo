@@ -136,6 +136,31 @@ export class SettlementService {
   }
 
   /**
+   * Cancel an on-chain match and trigger escrow refunds for depositors.
+   * Called when deposits time out or a staked match is cleaned up.
+   */
+  async cancelMatch(matchId: string): Promise<string | null> {
+    try {
+      const matchIdBytes32 = uuidToBytes32(matchId);
+
+      log.info({ matchId }, "Cancelling on-chain match (triggering refund)");
+
+      const tx = await this.settlement.cancelMatch(matchIdBytes32);
+      const receipt = await tx.wait();
+
+      log.info(
+        { matchId, txHash: receipt.hash },
+        "On-chain match cancelled, refunds triggered"
+      );
+
+      return receipt.hash as string;
+    } catch (err: any) {
+      log.error({ matchId, err: err.message }, "Failed to cancel on-chain match");
+      return null;
+    }
+  }
+
+  /**
    * Schedule automatic finalization after the dispute window.
    */
   scheduleFinalization(matchId: string, delayMs: number): void {
@@ -232,6 +257,56 @@ export class SettlementService {
    */
   static matchIdToBytes32(matchId: string): string {
     return uuidToBytes32(matchId);
+  }
+
+  /**
+   * On server startup, check completed staked matches and reconcile on-chain state.
+   * - Proposed but not finalized: finalize immediately (if deadline passed) or re-schedule
+   * - Already finalized: skip
+   * Returns the number of matches that needed action.
+   */
+  async reconcileOnStartup(
+    completedStakedMatches: { id: string; settlement_tx_hash: string | null }[]
+  ): Promise<number> {
+    let reconciled = 0;
+
+    for (const match of completedStakedMatches) {
+      if (!match.settlement_tx_hash) continue; // Un-proposed — handled by MatchService
+
+      try {
+        const matchIdBytes32 = uuidToBytes32(match.id);
+        const proposal = await this.settlement.getProposal(matchIdBytes32);
+        const status = Number(proposal.status); // 0=None, 1=Proposed, 2=Finalized, 3=Disputed
+
+        if (status === 1) {
+          // Proposed but not finalized
+          const deadline = Number(proposal.disputeDeadline);
+          const now = Math.floor(Date.now() / 1000);
+
+          if (now >= deadline) {
+            log.info({ matchId: match.id }, "Reconcile: finalizing stale settlement proposal");
+            await this.finalizeSettlement(match.id);
+            reconciled++;
+          } else {
+            const remainingMs = (deadline - now) * 1000 + 5000; // +5s buffer for block timestamps
+            log.info({ matchId: match.id, remainingMs }, "Reconcile: re-scheduling settlement finalization");
+            this.scheduleFinalization(match.id, remainingMs);
+            reconciled++;
+          }
+        } else if (status === 2) {
+          log.debug({ matchId: match.id }, "Reconcile: settlement already finalized");
+        } else if (status === 3) {
+          log.warn({ matchId: match.id }, "Reconcile: settlement is disputed — requires manual intervention");
+        }
+      } catch (err: any) {
+        log.error({ matchId: match.id, err: err.message }, "Reconcile: failed to check settlement status");
+      }
+    }
+
+    if (reconciled > 0) {
+      log.info({ reconciled }, "Settlement reconciliation complete");
+    }
+    return reconciled;
   }
 
   shutdown(): void {

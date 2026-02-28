@@ -64,7 +64,17 @@ import { createHttpWsServer } from "./ws/server";
   // 4b. Restore in-progress matches from database (before accepting connections)
   await matchService.restoreActiveMatches();
 
-  // 4c. ENS resolver (optional — uses mainnet RPC for reverse lookups)
+  // 4c. Reconcile on-chain settlements for completed staked matches
+  //     Catches up on any proposals/finalizations lost due to server restart
+  if (settlementService) {
+    const unproposed = await matchService.reconcileUnproposedSettlements();
+    const proposed = await matchService.reconcileProposedSettlements();
+    if (unproposed > 0 || proposed > 0) {
+      log.info({ unproposed, proposed }, "Settlement reconciliation complete on startup");
+    }
+  }
+
+  // 4d. ENS resolver (optional — uses mainnet RPC for reverse lookups)
   const ensRpcUrl = process.env.ENS_RPC_URL || config.rpcUrl || "https://eth.llamarpc.com";
   const ensResolver = new EnsResolver(ensRpcUrl);
   log.info({ rpc: ensRpcUrl }, "ENS resolver initialized");
@@ -98,6 +108,22 @@ import { createHttpWsServer } from "./ws/server";
     }
   }, QUEUE_PRUNE_INTERVAL_MS);
 
+  // 9. Periodic settlement reconciliation (every 5 minutes)
+  //    Catches proposals that need finalization during runtime (belt + suspenders)
+  const settlementReconcileInterval = settlementService
+    ? setInterval(async () => {
+        try {
+          const proposed = await matchService.reconcileProposedSettlements();
+          const unproposed = await matchService.reconcileUnproposedSettlements();
+          if (proposed > 0 || unproposed > 0) {
+            log.info({ proposed, unproposed }, "Periodic settlement reconciliation completed");
+          }
+        } catch (err: any) {
+          log.error({ err: err.message }, "Settlement reconciliation error");
+        }
+      }, CLEANUP_INTERVAL_MS)
+    : null;
+
   log.info("dork.fun server started");
 
   // Graceful shutdown
@@ -110,6 +136,7 @@ import { createHttpWsServer } from "./ws/server";
     clearInterval(cleanupInterval);
     clearInterval(staleCleanupInterval);
     clearInterval(queuePruneInterval);
+    if (settlementReconcileInterval) clearInterval(settlementReconcileInterval);
     settlementService?.shutdown();
     httpServer.close();
     await redis.quit();

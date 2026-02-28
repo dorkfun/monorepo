@@ -70,6 +70,17 @@ export async function findActiveMatches(): Promise<Match[]> {
     .execute();
 }
 
+export async function findCompletedStakedMatches(): Promise<Match[]> {
+  return db
+    .selectFrom("matches")
+    .where("status", "=", "completed")
+    .where("stake_wei", "is not", null)
+    .where("stake_wei", "!=", "0")
+    .selectAll()
+    .orderBy("completed_at", "asc")
+    .execute();
+}
+
 export async function updateMatch(
   id: string,
   update: MatchUpdate

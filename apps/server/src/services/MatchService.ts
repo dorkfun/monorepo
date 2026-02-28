@@ -1,5 +1,6 @@
 import { randomUUID } from "crypto";
 import Redis from "ioredis";
+import type { Match } from "@dorkfun/core";
 import {
   Action,
   MatchStatus,
@@ -16,6 +17,7 @@ import {
   createMatchMove,
   findMatchById,
   findActiveMatches,
+  findCompletedStakedMatches,
   findMovesByMatchId,
   listMatches,
   storeWsToken,
@@ -290,15 +292,21 @@ export class MatchService {
       await storeActiveMatchForPlayer(this.redis, address, matchId, gameId, effectiveStake);
     }
 
-    // Create on-chain match + escrow for staked matches (fire and forget, log errors)
+    // Create on-chain match + escrow for staked matches (awaited so escrow exists before DEPOSIT_REQUIRED)
     if (isStaked && this.settlement) {
       const gameIdBytes32 = this.settlement.getGameIdBytes32(gameId);
       if (gameIdBytes32) {
-        this.settlement
-          .createMatch(matchId, gameIdBytes32, players, effectiveStake)
-          .catch((err) =>
-            log.error({ matchId, err: err.message }, "Failed to create on-chain match")
-          );
+        const txHash = await this.settlement.createMatch(matchId, gameIdBytes32, players, effectiveStake);
+        if (!txHash) {
+          log.error({ matchId }, "On-chain escrow creation failed — cannot proceed with staked match");
+          match.status = MatchStatus.COMPLETED;
+          match.completedAt = new Date();
+          await updateMatch(matchId, { status: MatchStatus.COMPLETED, reason: "On-chain escrow creation failed" });
+          for (const address of players) {
+            await deleteActiveMatchForPlayer(this.redis, address);
+          }
+          throw new Error("Failed to create on-chain escrow for staked match");
+        }
       } else {
         log.warn({ matchId, gameId }, "No on-chain game ID configured — skipping on-chain match creation");
       }
@@ -615,6 +623,13 @@ export class MatchService {
           roomManager.removeRoom(matchId);
         }
 
+        // Cancel on-chain match to trigger escrow refunds for staked matches
+        if (match.stakeWei !== "0" && this.settlement) {
+          this.settlement.cancelMatch(matchId).catch((err) =>
+            log.error({ matchId, err: err.message }, "Failed to cancel on-chain match during stale cleanup")
+          );
+        }
+
         this.activeMatches.delete(matchId);
         log.info({ matchId, ageSec: Math.round(age / 1000) }, "Cleaned up stale WAITING match");
         cleaned++;
@@ -917,15 +932,21 @@ export class MatchService {
 
     if (isStaked) {
       // Staked private match: stay in WAITING until deposits are confirmed
-      // Create on-chain match + escrow now that both players are known
+      // Create on-chain match + escrow now that both players are known (awaited so escrow exists before DEPOSIT_REQUIRED)
       if (this.settlement) {
         const gameIdBytes32 = this.settlement.getGameIdBytes32(match.gameId);
         if (gameIdBytes32) {
-          this.settlement
-            .createMatch(matchId, gameIdBytes32, match.players, match.stakeWei)
-            .catch((err) =>
-              log.error({ matchId, err: err.message }, "Failed to create on-chain match")
-            );
+          const txHash = await this.settlement.createMatch(matchId, gameIdBytes32, match.players, match.stakeWei);
+          if (!txHash) {
+            log.error({ matchId }, "On-chain escrow creation failed — cannot proceed with staked private match");
+            match.status = MatchStatus.COMPLETED;
+            match.completedAt = new Date();
+            await updateMatch(matchId, { status: MatchStatus.COMPLETED, reason: "On-chain escrow creation failed" });
+            for (const p of match.players) {
+              await deleteActiveMatchForPlayer(this.redis, p);
+            }
+            return null;
+          }
         } else {
           log.warn({ matchId, gameId: match.gameId }, "No on-chain game ID configured — skipping on-chain match creation");
         }
@@ -991,6 +1012,34 @@ export class MatchService {
 
     log.info({ matchId, stakeWei: match.stakeWei }, "Staked match activated (deposits confirmed)");
     return true;
+  }
+
+  /**
+   * Mark a match as cancelled/completed and clean up all associated state.
+   * Used when deposits time out or a staked match needs to be torn down.
+   */
+  async completeMatchAsCancelled(matchId: string, reason: string): Promise<void> {
+    const match = this.activeMatches.get(matchId);
+    if (!match) return;
+
+    match.status = MatchStatus.COMPLETED;
+    match.winner = null;
+    match.completedAt = new Date();
+
+    await updateMatch(matchId, {
+      status: MatchStatus.COMPLETED,
+      winner: null,
+      reason,
+      completed_at: new Date(),
+    });
+
+    for (const playerId of match.players) {
+      await deleteGameSession(this.redis, matchId, playerId);
+      await deleteActiveMatchForPlayer(this.redis, playerId);
+    }
+
+    this.activeMatches.delete(matchId);
+    log.info({ matchId, reason }, "Match cancelled");
   }
 
   // --- WS Token management (Redis-backed) ---
@@ -1091,5 +1140,78 @@ export class MatchService {
       log.info({ restored, total: dbMatches.length }, "Active matches restored from database");
     }
     return restored;
+  }
+
+  /**
+   * Reconcile completed staked matches that were never proposed on-chain.
+   * This handles the case where the server crashed between game-over and proposeSettlement().
+   * Reconstructs the transcript from DB moves and proposes settlement.
+   */
+  async reconcileUnproposedSettlements(): Promise<number> {
+    if (!this.settlement) return 0;
+
+    const matches = await findCompletedStakedMatches();
+    let reconciled = 0;
+
+    for (const dbMatch of matches) {
+      if (dbMatch.settlement_tx_hash) continue; // Already proposed
+
+      try {
+        const game = this.gameRegistry.get(dbMatch.game_id);
+        if (!game) {
+          log.warn({ matchId: dbMatch.id, gameId: dbMatch.game_id }, "Reconcile: unknown game, skipping");
+          continue;
+        }
+
+        const players: string[] = JSON.parse(dbMatch.players);
+        const moves = await findMovesByMatchId(dbMatch.id);
+        if (moves.length === 0) {
+          log.warn({ matchId: dbMatch.id }, "Reconcile: no moves found, skipping");
+          continue;
+        }
+
+        // Reconstruct transcript from stored moves
+        const orchestrator = MatchOrchestrator.fromReplay({
+          game,
+          players,
+          matchId: dbMatch.id,
+          moves: moves.map((m) => ({
+            playerAddress: m.player_address,
+            action: JSON.parse(m.action),
+          })),
+        });
+        const transcript = orchestrator.getTranscript();
+
+        log.info({ matchId: dbMatch.id }, "Reconcile: proposing settlement for un-proposed staked match");
+        const txHash = await this.settlement.proposeSettlement(dbMatch.id, dbMatch.winner, transcript);
+        if (txHash) {
+          await updateMatch(dbMatch.id, { settlement_tx_hash: txHash });
+          this.settlement.scheduleFinalization(dbMatch.id, config.disputeWindowMs);
+          reconciled++;
+        }
+      } catch (err: any) {
+        log.error({ matchId: dbMatch.id, err: err.message }, "Reconcile: failed to propose settlement");
+      }
+    }
+
+    if (reconciled > 0) {
+      log.info({ reconciled }, "Reconciled un-proposed staked settlements");
+    }
+    return reconciled;
+  }
+
+  /**
+   * Reconcile completed staked matches that were proposed but not yet finalized.
+   * Checks on-chain status and either finalizes immediately or re-schedules.
+   */
+  async reconcileProposedSettlements(): Promise<number> {
+    if (!this.settlement) return 0;
+
+    const matches = await findCompletedStakedMatches();
+    const proposedMatches = matches.filter((m) => m.settlement_tx_hash);
+
+    if (proposedMatches.length === 0) return 0;
+
+    return this.settlement.reconcileOnStartup(proposedMatches);
   }
 }
